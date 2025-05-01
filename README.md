@@ -130,14 +130,16 @@ arguments:
 
 * 🧮 **Token Usage**: Gemini uses 32 tokens per second of audio (1,920 tokens/minute). For more details on audio processing capabilities, see [Gemini Audio Documentation](https://ai.google.dev/gemini-api/docs/audio).
 * 📈 **Output Tokens**: Gemini 2.5 Pro has a limit of 65,536 output tokens per request, which affects the maximum duration of processable audio. See [Gemini Models Documentation](https://ai.google.dev/gemini-api/docs/models#gemini-2.5-pro-preview-03-25) for details.
-* 📊 **Rate Limits**: The default model (`gemini-2.5-pro-exp-03-25`) is free during the preview period but subject to TPM (tokens per minute) limits. See [Rate Limits Documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for details.
-* 💰 **Pricing**: Paid tier costs $1.25 per million tokens (≤200k tokens) or $2.50 per million tokens (>200k tokens). See [Gemini Developer API Pricing](https://ai.google.dev/gemini-api/docs/pricing) for complete pricing information.
+* 📊 **Rate Limits**: The default model (`gemini-2.5-pro-exp-03-25`) is free during the preview period but subject to specific limits: 250,000 TPM (tokens per minute), 1,000,000 TPD (tokens per day), 5 RPM (requests per minute) and 25 RPM (requests per minute). See [Rate Limits Documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for details.
+* 💰 **Pricing**: Paid tier costs $1.25 per million tokens (≤200k tokens) or $2.50 per million tokens (>200k tokens). For audio longer than 2 hours, it is recommended to split the file to avoid excessive token usage and potential cost overruns. See [Gemini Developer API Pricing](https://ai.google.dev/gemini-api/docs/pricing) for complete pricing information.
 
 ## 📝 Notes
 
 * The script uses the Gemini API, which has usage limits and may incur costs beyond the free tier.
 * For optimal performance, consider:
   * 🔑 Using multiple API keys (comma-separated in the .env file)
-  * ⏱️ Adjusting the segment duration based on your content
-  * 🧵 Setting appropriate max-workers based on your system capabilities
-* ⚠️ If you encounter 429 (Too Many Requests) errors, try reducing the number of max-workers, adding more API keys, or upgrade to the paid tier and use the `--ignore-keys-limit` option.
+  * ⏱️ Adjusting the segment duration based on content complexity—**keep segments under 60 minutes** to avoid output token limits and stay within TPM constraints for free tier users
+  * 🧵 Configuring max-workers appropriately based on your system's capabilities and the number of available API keys
+  * 🚫 The `--ignore-keys-limit` option should be used cautiously and primarily by paid tier users to avoid hitting the strict TPM limits of the free tier
+* ⚠️ If you encounter 429 (Too Many Requests) errors, try reducing the number of max-workers, adding more API keys, or upgrading to the paid tier
+* 💲 Paid tier users should use the `gemini-2.5-pro-preview-03-25` model and can safely utilize the `--ignore-keys-limit` option due to higher TPM allowances.
