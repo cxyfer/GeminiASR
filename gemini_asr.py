@@ -30,9 +30,31 @@ thread_local = threading.local()
 # 建立日誌鎖，確保日誌輸出互斥
 log_lock = threading.RLock()
 
+# 新增一個執行緒安全的鎖，用於管理 API KEY 列表
+api_keys_lock = threading.RLock()
+
+# 保存已被限流的 API 金鑰
+exhausted_keys = set()
+
 def get_random_api_key():
-    """從 API KEY 列表中隨機選取一個"""
-    return random.choice(GOOGLE_API_KEYS)
+    """從 API KEY 列表中隨機選取一個可用的金鑰"""
+    with api_keys_lock:
+        # 篩選出未被限流的金鑰
+        available_keys = [key for key in GOOGLE_API_KEYS if key not in exhausted_keys]
+        if not available_keys:
+            logging.error("所有 API KEY 已被限流，無法繼續處理")
+            raise ValueError("所有 API KEY 已被限流")
+        return random.choice(available_keys)
+
+def remove_exhausted_key(key):
+    """將已限流的 API KEY 標記為不可用"""
+    with api_keys_lock:
+        if key in GOOGLE_API_KEYS and key not in exhausted_keys:
+            exhausted_keys.add(key)
+            remaining = len(GOOGLE_API_KEYS) - len(exhausted_keys)
+            logging.warning(f"API KEY (後6位: ...{key[-6:]}) 已被限流，從可用池中移除。剩餘可用金鑰: {remaining}")
+            return True
+        return False
 
 def setup_logging(level=logging.INFO):
     """設定日誌格式和級別"""
@@ -161,7 +183,7 @@ def get_transcription_prompt(extra_prompt=None):
     
     return PromptTemplate.from_template(template)
 
-def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None, time_offset=0, preview=False):
+def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None, time_offset=0, preview=False, max_retries=3):
     """
     處理單個音訊檔案的轉錄工作，設計為可在多執行緒環境中運行
     
@@ -176,6 +198,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
         extra_prompt (str, optional): 額外的提示詞內容
         time_offset (int, optional): 時間偏移量（秒）
         preview (bool, optional): 是否顯示原始轉錄結果預覽
+        max_retries (int, optional): 最大重試次數，預設為3
         
     Returns:
         tuple: (SRT 格式的字幕內容, 原始轉錄檔案路徑)
@@ -192,75 +215,111 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
     prompt = prompt_template.format(language=lang)
     logging.debug(f"已生成提示詞模板，語言設定: {lang}")
     
+    # 讀取音訊檔案
     try:
-        # 讀取音訊檔案
         with open(file, "rb") as f:
             audio_data = f.read()
         logging.debug(f"已讀取音訊檔案 {file}，大小: {len(audio_data)/1024/1024:.2f} MB")
-        
-        # 使用 Gemini 進行轉錄
-        logging.debug("正在使用 Gemini API 轉錄音訊...")
-        generation_config = {
-            "temperature": 0,
-            "top_p": 1,
-            "top_k": 32,
-            "max_output_tokens": None
-        }
-        logging.debug("轉錄設定: temperature=0, max_tokens=None")
-        
-        # 隨機選取一個 API KEY 並配置
-        random_key = get_random_api_key()
-        logging.debug(f"使用隨機選取的 API KEY (後6位: ...{random_key[-6:]})")
-        
-        # 在當前執行緒中設定 API KEY
-        genai.configure(api_key=random_key)
-        
-        model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
-        
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "audio/mp3", "data": audio_data}
-        ])
-        
-        # 獲取原始轉錄文字
-        raw_transcript = response.text
-        logging.debug(f"已收到 Gemini API 回應，回應長度: {len(raw_transcript)} 字元")
-        
-        # 印出原始轉錄結果 (可能較長，只顯示前200個字符和後200個字符)
-        if preview:
-            if len(raw_transcript) > 400:
-                preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
-            else:
-                preview_text = raw_transcript
-            
-            logging.info(f"原始轉錄結果預覽:\n{preview_text}")
-        
-        # 保存原始轉錄結果
-        raw_file = None
-        if save_raw:
-            raw_file = save_raw_transcript(raw_transcript, raw_dir, basename)
-            logging.info(f"原始轉錄結果已保存至: {raw_file}")
-        
-        # 直接將 Gemini 的回應轉換為 SRT 格式
-        logging.debug(f"處理轉錄結果，時間偏移: {time_offset} 秒")
-        srt_content = direct_to_srt(raw_transcript, time_offset)
-        
-        if not srt_content:
-            logging.error(f"轉錄 {file} 失敗")
-            return None, raw_file
-            
-        # 使用字幕編號計數而不是換行符
-        subtitle_count = srt_content.count("\n\n") if srt_content else 0
-        logging.debug(f"已將轉錄結果轉換為 SRT 格式，估計字幕數量: {subtitle_count}") 
-        
-        time2 = time.time()
-        processing_time = time2 - time1
-        logging.info(f"已完成 {basename} 的轉錄，耗時 {processing_time:.2f} 秒")
-        
-        return srt_content, raw_file
     except Exception as e:
-        logging.error(f"處理 {file} 時發生錯誤: {e}", exc_info=True)
+        logging.error(f"讀取音訊檔案 {file} 時發生錯誤: {e}")
         return None, None
+        
+    # 設定 Gemini 模型配置
+    generation_config = {
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 32,
+        "max_output_tokens": None
+    }
+    logging.debug("轉錄設定: temperature=0, max_tokens=None")
+    
+    # 實作重試邏輯
+    retries = 0
+    last_error = None
+    
+    while retries <= max_retries:
+        current_key = None
+        try:
+            # 隨機選取一個 API KEY 並配置
+            try:
+                current_key = get_random_api_key()
+                logging.debug(f"使用隨機選取的 API KEY (後6位: ...{current_key[-6:]})")
+                
+                # 在當前執行緒中設定 API KEY
+                genai.configure(api_key=current_key)
+            except ValueError as e:
+                # 已經沒有可用的 API KEY
+                logging.error(f"無法獲取可用的 API KEY: {e}")
+                return None, None
+            
+            # 創建模型並送出請求
+            model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
+            
+            response = model.generate_content([
+                prompt,
+                {"mime_type": "audio/mp3", "data": audio_data}
+            ])
+            
+            # 獲取原始轉錄文字
+            raw_transcript = response.text
+            logging.debug(f"已收到 Gemini API 回應，回應長度: {len(raw_transcript)} 字元")
+            
+            # 印出原始轉錄結果 (可能較長，只顯示前200個字符和後200個字符)
+            if preview:
+                if len(raw_transcript) > 400:
+                    preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
+                else:
+                    preview_text = raw_transcript
+                
+                logging.info(f"原始轉錄結果預覽:\n{preview_text}")
+            
+            # 保存原始轉錄結果
+            raw_file = None
+            if save_raw:
+                raw_file = save_raw_transcript(raw_transcript, raw_dir, basename)
+                logging.info(f"原始轉錄結果已保存至: {raw_file}")
+            
+            # 直接將 Gemini 的回應轉換為 SRT 格式
+            logging.debug(f"處理轉錄結果，時間偏移: {time_offset} 秒")
+            srt_content = direct_to_srt(raw_transcript, time_offset)
+            
+            if not srt_content:
+                logging.error(f"轉錄 {file} 失敗")
+                return None, raw_file
+                
+            # 使用字幕編號計數而不是換行符
+            subtitle_count = srt_content.count("\n\n") if srt_content else 0
+            logging.debug(f"已將轉錄結果轉換為 SRT 格式，估計字幕數量: {subtitle_count}") 
+            
+            time2 = time.time()
+            processing_time = time2 - time1
+            logging.info(f"已完成 {basename} 的轉錄，耗時 {processing_time:.2f} 秒")
+            
+            return srt_content, raw_file
+            
+        except Exception as e:
+            last_error = e
+            error_message = str(e)
+            
+            # 檢查是否為配額限制錯誤 (429)
+            if "429" in error_message and current_key:
+                logging.warning(f"API KEY 限流錯誤: {error_message}")
+                # 標記當前 KEY 為已用盡
+                if remove_exhausted_key(current_key):
+                    retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
+                
+            retries += 1
+            
+            if retries <= max_retries:
+                backoff_time = 2 ** retries  # 指數退避策略
+                logging.warning(f"第 {retries} 次重試，等待 {backoff_time} 秒...")
+                time.sleep(backoff_time)
+            else:
+                logging.error(f"處理 {file} 時發生錯誤，已重試 {max_retries} 次: {last_error}")
+                
+    # 所有重試都失敗
+    logging.error(f"處理 {file} 時發生錯誤: {last_error}", exc_info=True)
+    return None, None
 
 def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
     lang = kwargs.get("lang", 'zh-TW')
