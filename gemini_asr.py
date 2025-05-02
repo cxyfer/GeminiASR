@@ -658,7 +658,7 @@ def clip_and_transcribe(filepath, st=None, ed=None, skip_existing=False, **kwarg
     
     # Pass skip_existing=False here, as the check was already done based on the *original* filename
     # Or pass skip_existing=skip_existing if main should re-check based on the newpath (less likely desired)
-    main(newpath, skip_existing=False, **kwargs) # Pass kwargs explicitly
+    main(newpath, **kwargs) # Pass kwargs explicitly
 
 
 def process_directory(directory_path, skip_existing=False, **kwargs):
@@ -715,7 +715,6 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
             "save_raw": kwargs.get("save_raw"),
             "max_workers": kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5)),
             "extra_prompt": kwargs.get("extra_prompt"),
-            "skip_existing": skip_existing
         }
 
         # 檢查是否需要剪輯
@@ -730,8 +729,7 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
                                skip_existing=skip_existing,
                                **common_kwargs)
         else:
-            main(filepath, skip_existing=skip_existing,
-                 **common_kwargs)
+            main(filepath, **common_kwargs)
 
     logging.info("目錄處理完成")
 
@@ -784,7 +782,7 @@ if __name__ == "__main__":
         "max_workers": args.max_workers,
         "extra_prompt": extra_prompt_value,
         "skip_existing": args.skip_existing,
-        "preview": args.preview  # 直接使用參數值
+        "preview": args.preview
     }
 
     # Check if the input is a directory
