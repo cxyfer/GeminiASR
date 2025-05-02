@@ -77,35 +77,36 @@ def setup_logging(level=logging.INFO):
     
     logging.debug(f"日誌系統已初始化，級別: {logging.getLevelName(level)}")
 
-def split_video(video_path, temp_dir, duration=300):
-    logging.debug(f"開始分割影片 {video_path}，分段時長: {duration} 秒")
-    video = mp.VideoFileClip(video_path)
-    total_duration = int(video.duration)
+def split_media(media_path, temp_dir, duration=300):
+    """將視頻或音訊文件分割成較小的區段"""
+    file_type = "影片" if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) else "音訊"
+    logging.debug(f"開始分割{file_type} {media_path}，分段時長: {duration} 秒")
+    
+    # 根據文件類型載入媒體
+    if file_type == "影片":
+        media = mp.VideoFileClip(media_path)
+        is_video = True
+    else:
+        media = mp.AudioFileClip(media_path)
+        is_video = False
+    
+    total_duration = int(media.duration)
     parts = total_duration // duration if total_duration % duration == 0 else total_duration // duration + 1
-    logging.debug(f"影片總時長: {total_duration} 秒，將分為 {parts} 個部分")
+    logging.debug(f"{file_type}總時長: {total_duration} 秒，將分為 {parts} 個部分")
     
     for idx in range(1, parts + 1):
         chunk_filename = os.path.join(temp_dir, f"chunk_{idx:02d}.mp3")
         logging.debug(f"處理第 {idx}/{parts} 部分 → {chunk_filename}")
-        clip = video.subclip((idx - 1) * duration, min(idx * duration, total_duration))
-        clip.audio.write_audiofile(chunk_filename, verbose=False, logger=None)
+        clip = media.subclip((idx - 1) * duration, min(idx * duration, total_duration))
+        
+        # 根據媒體類型選擇適當的保存方法
+        if is_video:
+            clip.audio.write_audiofile(chunk_filename, verbose=False, logger=None)
+        else:
+            clip.write_audiofile(chunk_filename, verbose=False, logger=None)
     
-    logging.info(f"已將影片分割成 {parts} 個部分")
-
-def split_audio(audio_path, temp_dir, duration=300):
-    logging.debug(f"開始分割音訊 {audio_path}，分段時長: {duration} 秒")
-    audio = mp.AudioFileClip(audio_path)
-    total_duration = int(audio.duration)
-    parts = total_duration // duration if total_duration % duration == 0 else total_duration // duration + 1
-    logging.debug(f"音訊總時長: {total_duration} 秒，將分為 {parts} 個部分")
-    
-    for idx in range(1, parts + 1):
-        chunk_filename = os.path.join(temp_dir, f"chunk_{idx:02d}.mp3")
-        logging.debug(f"處理第 {idx}/{parts} 部分 → {chunk_filename}")
-        clip = audio.subclip((idx - 1) * duration, min(idx * duration, total_duration))
-        clip.write_audiofile(chunk_filename, verbose=False, logger=None)
-    
-    logging.info(f"已將音訊分割成 {parts} 個部分")
+    logging.info(f"已將{file_type}分割成 {parts} 個部分")
+    media.close()
 
 def save_raw_transcript(transcript_text, output_path, chunk_name):
     """
@@ -160,7 +161,7 @@ def get_transcription_prompt(extra_prompt=None):
     
     return PromptTemplate.from_template(template)
 
-def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None):
+def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None, time_offset=0):
     """
     處理單個音訊檔案的轉錄工作，設計為可在多執行緒環境中運行
     
@@ -173,13 +174,14 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
         save_raw (bool): 是否保存原始轉錄結果
         raw_dir (str): 原始轉錄儲存目錄
         extra_prompt (str, optional): 額外的提示詞內容
+        time_offset (int, optional): 時間偏移量（秒）
         
     Returns:
         tuple: (SRT 格式的字幕內容, 原始轉錄檔案路徑)
     """
     basename = os.path.basename(file)
-    time_offset = idx * duration
     logging.info(f"正在轉錄 {basename} (索引 {idx})...")
+    logging.debug(f"應用時間偏移量: {time_offset} 秒")
     time1 = time.time()
     
     # 設定提示詞模板
@@ -245,7 +247,9 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             logging.error(f"轉錄 {file} 失敗")
             return None, raw_file
             
-        logging.debug(f"已將轉錄結果轉換為 SRT 格式，字幕數量: {srt_content.count('1')}") # Assuming '1' starts a new entry reliably, or adjust logic if needed
+        # 使用字幕編號計數而不是換行符
+        subtitle_count = srt_content.count("\n\n") if srt_content else 0
+        logging.debug(f"已將轉錄結果轉換為 SRT 格式，估計字幕數量: {subtitle_count}") 
         
         time2 = time.time()
         processing_time = time2 - time1
@@ -264,6 +268,7 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
     original_file = kwargs.get("original_file", "unknown")
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
     extra_prompt = kwargs.get("extra_prompt", None)
+    time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
     
     # 如果未指定原始轉錄儲存目錄，則使用預設路徑
     if raw_dir is None:
@@ -272,7 +277,7 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
         base_name = os.path.splitext(os.path.basename(original_file))[0]
         raw_dir = os.path.join(base_dir, f"{base_name}_transcripts")
     
-    logging.debug(f"開始轉錄處理，語言: {lang}，模型: {model_name}，最大工作執行緒數: {max_workers}")
+    logging.debug(f"開始轉錄處理，語言: {lang}，模型: {model_name}，最大工作執行緒數: {max_workers}，時間偏移量: {time_offset}秒")
     files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith(".mp3")]
     files.sort()  # 確保檔案順序
     logging.debug(f"找到 {len(files)} 個待轉錄的音訊檔案")
@@ -290,10 +295,14 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
         # 建立任務列表
         future_to_idx = {}
         for idx, file in enumerate(files):
+            # 計算每個片段的時間偏移
+            segment_time_offset = time_offset + (idx * duration)
+            logging.debug(f"檔案 {idx} 的時間偏移量: {segment_time_offset}秒")
+            
             future = executor.submit(
                 process_single_file, 
                 file, idx, duration, lang, model_name, 
-                save_raw, raw_dir, extra_prompt  # 傳入額外提示詞
+                save_raw, raw_dir, extra_prompt, segment_time_offset  # 傳入計算後的時間偏移量
             )
             future_to_idx[future] = idx
         
@@ -537,8 +546,9 @@ def main(video_path, skip_existing=False, **kwargs):
     save_raw = kwargs.get("save_raw", False)
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
     extra_prompt = kwargs.get("extra_prompt", None)
+    time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
 
-    logging.debug(f"處理參數: 分段時長={duration}秒, 語言={lang}, 模型={model}, 保存原始轉錄={save_raw}, 最大工作執行緒數={max_workers}, 跳過已存在={skip_existing}")
+    logging.debug(f"處理參數: 分段時長={duration}秒, 語言={lang}, 模型={model}, 保存原始轉錄={save_raw}, 最大工作執行緒數={max_workers}, 跳過已存在={skip_existing}, 時間偏移量={time_offset}秒")
 
     _, ext = os.path.splitext(video_path)
     output_file = video_path.replace(ext, ".srt")
@@ -552,10 +562,10 @@ def main(video_path, skip_existing=False, **kwargs):
         logging.debug(f"創建臨時目錄: {temp_dir}")
         if ext.lower() in [".mp4", ".avi", ".mkv"]:
             logging.info("檢測到影片檔案，開始分割音訊")
-            split_video(video_path, temp_dir, duration=duration)
+            split_media(video_path, temp_dir, duration=duration)
         elif ext.lower() in [".mp3", ".wav"]:
             logging.info("檢測到音訊檔案，開始分割")
-            split_audio(video_path, temp_dir, duration=duration)
+            split_media(video_path, temp_dir, duration=duration)
         else:
             logging.error(f"不支援的檔案格式: {ext}")
             return
@@ -564,7 +574,8 @@ def main(video_path, skip_existing=False, **kwargs):
         subs = transcribe_with_gemini(temp_dir, duration=duration, lang=lang, model=model,
                                     save_raw=save_raw, original_file=video_path,
                                     max_workers=max_workers,
-                                    extra_prompt=extra_prompt)
+                                    extra_prompt=extra_prompt,
+                                    time_offset=time_offset)  # 傳遞時間偏移量
 
         if not subs:
             logging.error("轉錄失敗，未獲得任何字幕")
@@ -637,6 +648,11 @@ def clip_and_transcribe(filepath, st=None, ed=None, skip_existing=False, **kwarg
         st = 0
     newpath = clip(filepath, st, ed)
     logging.debug(f"開始轉錄剪輯後的音訊: {newpath}")
+    
+    # 將原始開始時間作為參數傳遞，用於時間戳校正
+    kwargs['time_offset'] = st
+    logging.debug(f"設定時間偏移量: {st} 秒，用於校正字幕時間戳")
+    
     # Pass skip_existing=False here, as the check was already done based on the *original* filename
     # Or pass skip_existing=skip_existing if main should re-check based on the newpath (less likely desired)
     main(newpath, skip_existing=False, **kwargs) # Pass kwargs explicitly
@@ -695,15 +711,23 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
             "model": kwargs.get("model", "gemini-2.5-pro-exp-03-25"),
             "save_raw": kwargs.get("save_raw"),
             "max_workers": kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5)),
-            "extra_prompt": kwargs.get("extra_prompt")
+            "extra_prompt": kwargs.get("extra_prompt"),
+            "skip_existing": skip_existing
         }
 
-        if kwargs.get("start") is not None or kwargs.get("end") is not None:
-            clip_and_transcribe(filepath, st=kwargs.get("start"), ed=kwargs.get("end"),
-                               skip_existing=skip_existing, # Pass the flag
+        # 檢查是否需要剪輯
+        start_time = kwargs.get("start")
+        end_time = kwargs.get("end")
+        if start_time is not None or end_time is not None:
+            # 確保開始時間有值，用於時間戳校正
+            if start_time is None:
+                start_time = 0
+            logging.debug(f"將使用時間偏移量 {start_time} 秒進行轉錄")
+            clip_and_transcribe(filepath, st=start_time, ed=end_time,
+                               skip_existing=skip_existing,
                                **common_kwargs)
         else:
-            main(filepath, skip_existing=skip_existing, # Pass the flag
+            main(filepath, skip_existing=skip_existing,
                  **common_kwargs)
 
     logging.info("目錄處理完成")
