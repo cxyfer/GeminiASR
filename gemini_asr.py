@@ -161,7 +161,7 @@ def get_transcription_prompt(extra_prompt=None):
     
     return PromptTemplate.from_template(template)
 
-def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None, time_offset=0):
+def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir, extra_prompt=None, time_offset=0, preview=False):
     """
     處理單個音訊檔案的轉錄工作，設計為可在多執行緒環境中運行
     
@@ -175,6 +175,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
         raw_dir (str): 原始轉錄儲存目錄
         extra_prompt (str, optional): 額外的提示詞內容
         time_offset (int, optional): 時間偏移量（秒）
+        preview (bool, optional): 是否顯示原始轉錄結果預覽
         
     Returns:
         tuple: (SRT 格式的字幕內容, 原始轉錄檔案路徑)
@@ -226,12 +227,13 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
         logging.debug(f"已收到 Gemini API 回應，回應長度: {len(raw_transcript)} 字元")
         
         # 印出原始轉錄結果 (可能較長，只顯示前200個字符和後200個字符)
-        if len(raw_transcript) > 400:
-            preview = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
-        else:
-            preview = raw_transcript
+        if preview:
+            if len(raw_transcript) > 400:
+                preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
+            else:
+                preview_text = raw_transcript
             
-        logging.info(f"原始轉錄結果預覽:\n{preview}")
+            logging.info(f"原始轉錄結果預覽:\n{preview_text}")
         
         # 保存原始轉錄結果
         raw_file = None
@@ -269,6 +271,7 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
     extra_prompt = kwargs.get("extra_prompt", None)
     time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
+    preview = kwargs.get("preview", False)  # 新預設為 False
     
     # 如果未指定原始轉錄儲存目錄，則使用預設路徑
     if raw_dir is None:
@@ -302,7 +305,7 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
             future = executor.submit(
                 process_single_file, 
                 file, idx, duration, lang, model_name, 
-                save_raw, raw_dir, extra_prompt, segment_time_offset  # 傳入計算後的時間偏移量
+                save_raw, raw_dir, extra_prompt, segment_time_offset, preview  # 傳入預覽參數
             )
             future_to_idx[future] = idx
         
@@ -747,6 +750,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-workers", help="最大工作執行緒數 (預設情況下不能超過 GOOGLE_API_KEYS 的數量)", type=int, default=min(32, (os.cpu_count() or 1) * 5))
     parser.add_argument("--extra-prompt", help="額外的提示詞 或 包含提示詞的檔案路徑", type=str)
     parser.add_argument("--ignore-keys-limit", help="忽略 API KEY 數量對最大工作執行緒數的限制", action="store_true")
+    parser.add_argument("--preview", help="顯示原始轉錄結果預覽", action="store_true")
     args = parser.parse_args()
 
     # Set logging level
@@ -779,7 +783,8 @@ if __name__ == "__main__":
         "save_raw": args.save_raw,
         "max_workers": args.max_workers,
         "extra_prompt": extra_prompt_value,
-        "skip_existing": args.skip_existing # Pass the new flag
+        "skip_existing": args.skip_existing,
+        "preview": args.preview  # 直接使用參數值
     }
 
     # Check if the input is a directory
