@@ -9,7 +9,8 @@ import threading
 import concurrent.futures
 
 import moviepy.editor as mp
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
@@ -18,11 +19,6 @@ load_dotenv()
 GOOGLE_API_KEYS = [key.strip() for key in os.getenv('GOOGLE_API_KEY', '').split(',') if key.strip()]
 if not GOOGLE_API_KEYS:
     raise ValueError("未找到有效的 GOOGLE_API_KEY 環境變數")
-
-# 初始化時使用第一個 KEY 進行配置
-genai.configure(
-    api_key=GOOGLE_API_KEYS[0]
-)
 
 # 為確保多執行緒環境中的執行緒安全，創建一個執行緒本地存儲
 thread_local = threading.local()
@@ -33,26 +29,20 @@ log_lock = threading.RLock()
 # 新增一個執行緒安全的鎖，用於管理 API KEY 列表
 api_keys_lock = threading.RLock()
 
-# 保存已被限流的 API 金鑰
-exhausted_keys = set()
-
 def get_random_api_key():
     """從 API KEY 列表中隨機選取一個可用的金鑰"""
     with api_keys_lock:
-        # 篩選出未被限流的金鑰
-        available_keys = [key for key in GOOGLE_API_KEYS if key not in exhausted_keys]
-        if not available_keys:
-            logging.error("所有 API KEY 已被限流，無法繼續處理")
-            raise ValueError("所有 API KEY 已被限流")
-        return random.choice(available_keys)
+        if not GOOGLE_API_KEYS:
+            logging.error("所有 API KEY 已超過使用限制，無法繼續處理")
+            raise ValueError("All API KEYs have exceeded their usage limit")
+        return random.choice(GOOGLE_API_KEYS)
 
 def remove_exhausted_key(key):
     """將已限流的 API KEY 標記為不可用"""
     with api_keys_lock:
-        if key in GOOGLE_API_KEYS and key not in exhausted_keys:
-            exhausted_keys.add(key)
-            remaining = len(GOOGLE_API_KEYS) - len(exhausted_keys)
-            logging.warning(f"API KEY (後6位: ...{key[-6:]}) 已被限流，從可用池中移除。剩餘可用金鑰: {remaining}")
+        if key in GOOGLE_API_KEYS:
+            GOOGLE_API_KEYS.remove(key)
+            logging.warning(f"API KEY (後6位: ...{key[-6:]}) 已超過使用限制，從可用池中移除。剩餘可用金鑰: {len(GOOGLE_API_KEYS)}")
             return True
         return False
 
@@ -101,16 +91,15 @@ def setup_logging(level=logging.INFO):
 
 def split_media(media_path, temp_dir, duration=300):
     """將視頻或音訊文件分割成較小的區段"""
-    file_type = "影片" if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) else "音訊"
+    is_video = True if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) else False
+    file_type = "影片" if is_video else "音訊"
     logging.debug(f"開始分割{file_type} {media_path}，分段時長: {duration} 秒")
     
     # 根據文件類型載入媒體
-    if file_type == "影片":
+    if is_video:
         media = mp.VideoFileClip(media_path)
-        is_video = True
     else:
         media = mp.AudioFileClip(media_path)
-        is_video = False
     
     total_duration = int(media.duration)
     parts = total_duration // duration if total_duration % duration == 0 else total_duration // duration + 1
@@ -215,23 +204,13 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
     prompt = prompt_template.format(language=lang)
     logging.debug(f"已生成提示詞模板，語言設定: {lang}")
     
-    # 讀取音訊檔案
-    try:
-        with open(file, "rb") as f:
-            audio_data = f.read()
-        logging.debug(f"已讀取音訊檔案 {file}，大小: {len(audio_data)/1024/1024:.2f} MB")
-    except Exception as e:
-        logging.error(f"讀取音訊檔案 {file} 時發生錯誤: {e}")
-        return None, None
-        
     # 設定 Gemini 模型配置
-    generation_config = {
-        "temperature": 0,
-        "top_p": 1,
-        "top_k": 32,
-        "max_output_tokens": None
-    }
-    logging.debug("轉錄設定: temperature=0, max_tokens=None")
+    generation_config = types.GenerateContentConfig(
+        temperature=0,
+        top_p=1,
+        top_k=32,
+        max_output_tokens=None
+    )
     
     # 實作重試邏輯
     retries = 0
@@ -244,21 +223,27 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             try:
                 current_key = get_random_api_key()
                 logging.debug(f"使用隨機選取的 API KEY (後6位: ...{current_key[-6:]})")
-                
-                # 在當前執行緒中設定 API KEY
-                genai.configure(api_key=current_key)
+                client = genai.Client(api_key=current_key)
             except ValueError as e:
                 # 已經沒有可用的 API KEY
                 logging.error(f"無法獲取可用的 API KEY: {e}")
                 return None, None
             
-            # 創建模型並送出請求
-            model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
-            
-            response = model.generate_content([
-                prompt,
-                {"mime_type": "audio/mp3", "data": audio_data}
-            ])
+            # 先上傳音訊檔案
+            try:
+                logging.debug(f"正在上傳音訊檔案 {file}")
+                uploaded_file = client.files.upload(file=file)
+                logging.debug(f"已成功上傳檔案 {file}")
+            except Exception as e:
+                logging.error(f"上傳音訊檔案失敗: {e}")
+                return None, None
+                
+            # 創建模型並送出請求 - 修改為使用上傳的檔案
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[prompt, uploaded_file],
+                config=generation_config
+            )
             
             # 獲取原始轉錄文字
             raw_transcript = response.text
@@ -298,6 +283,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             return srt_content, raw_file
             
         except Exception as e:
+            logging.error(f"處理 {file} 時發生錯誤: {e}")
             last_error = e
             error_message = str(e)
             
