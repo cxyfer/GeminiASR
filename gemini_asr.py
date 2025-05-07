@@ -7,6 +7,7 @@ import logging
 import random
 import threading
 import concurrent.futures
+import collections
 
 import moviepy.editor as mp
 from google import genai
@@ -307,7 +308,29 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
     logging.error(f"處理 {file} 時發生錯誤: {last_error}", exc_info=True)
     return None, None
 
-def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
+def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=1, **kwargs):
+    """
+    使用 Gemini 模型並行轉錄音訊檔案區塊。
+
+    Args:
+        temp_dir (str): 包含音訊區塊的暫存目錄。
+        duration (int, optional): 每個音訊區塊的時長（秒）。預設為 300。
+        max_segment_retries (int, optional): 每個音訊區塊轉錄失敗時的最大重試次數。預設為 1。
+        **kwargs: 其他傳遞給 process_single_file 的參數，例如：
+            lang (str): 轉錄語言，預設 'zh-TW'。
+            model (str): Gemini 模型名稱。
+            save_raw (bool): 是否儲存原始轉錄結果。
+            raw_dir (str): 原始轉錄結果儲存目錄。
+            original_file (str): 原始媒體檔案路徑，用於生成預設 raw_dir。
+            max_workers (int): ThreadPoolExecutor 的最大工作執行緒數。
+            extra_prompt (str): 額外的轉錄提示。
+            time_offset (int): 整體時間偏移量（秒）。
+            preview (bool): 是否預覽原始轉錄結果。
+
+    Returns:
+        list or None: 如果所有區塊都成功轉錄，則返回 SRT 字幕內容的列表。
+                      如果有任何區塊在用盡重試次數後仍然失敗，則返回 None。
+    """
     lang = kwargs.get("lang", 'zh-TW')
     model_name = kwargs.get("model", "gemini-2.5-pro-exp-03-25")
     save_raw = kwargs.get("save_raw", False)
@@ -315,75 +338,152 @@ def transcribe_with_gemini(temp_dir, duration=300, **kwargs):
     original_file = kwargs.get("original_file", "unknown")
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
     extra_prompt = kwargs.get("extra_prompt", None)
-    time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
-    preview = kwargs.get("preview", False)  # 新預設為 False
-    
-    # 如果未指定原始轉錄儲存目錄，則使用預設路徑
+    time_offset = kwargs.get("time_offset", 0)
+    preview = kwargs.get("preview", False)
+
     if raw_dir is None:
-        # 從原始檔案路徑獲取目錄和檔名
         base_dir = os.path.dirname(original_file)
         base_name = os.path.splitext(os.path.basename(original_file))[0]
         raw_dir = os.path.join(base_dir, f"{base_name}_transcripts")
-    
-    logging.debug(f"開始轉錄處理，語言: {lang}，模型: {model_name}，最大工作執行緒數: {max_workers}，時間偏移量: {time_offset}秒")
-    files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith(".mp3")]
-    files.sort()  # 確保檔案順序
-    logging.debug(f"找到 {len(files)} 個待轉錄的音訊檔案")
-    
+
+    logging.debug(
+        f"開始轉錄處理，語言: {lang}，模型: {model_name}，"
+        f"最大工作執行緒數: {max_workers}，時間偏移量: {time_offset}秒，"
+        f"片段最大重試次數: {max_segment_retries}"
+    )
+
+    all_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith(".mp3")]
+    all_files.sort()
+    logging.debug(f"找到 {len(all_files)} 個待轉錄的音訊檔案")
+
+    if not all_files:
+        logging.info("在暫存目錄中未找到任何 .mp3 檔案可供轉錄。")
+        return []
+
     # 創建結果儲存容器
-    transcripts = [None] * len(files)  # 預先分配空間
-    raw_transcripts = []
+    transcripts_results = [None] * len(all_files)
+    raw_transcripts_paths = []
     
     # 確保輸出目錄存在
     if save_raw:
         os.makedirs(raw_dir, exist_ok=True)
+
+    # 任務定義: (file_path, original_index, current_retry_count, segment_time_offset)
+    Task = collections.namedtuple('Task', ['file_path', 'original_index', 'current_retry_count', 'segment_time_offset'])
     
-    # 使用 ThreadPoolExecutor 並行處理音訊檔案
+    tasks_to_process = collections.deque()
+    for idx, file_path in enumerate(all_files):
+        segment_time_offset = time_offset + (idx * duration)
+        tasks_to_process.append(Task(file_path, idx, 0, segment_time_offset))
+
+    active_futures = {}  # future -> Task
+    overall_transcription_failed = False
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 建立任務列表
-        future_to_idx = {}
-        for idx, file in enumerate(files):
-            # 計算每個片段的時間偏移
-            segment_time_offset = time_offset + (idx * duration)
-            logging.debug(f"檔案 {idx} 的時間偏移量: {segment_time_offset}秒")
+        while tasks_to_process or active_futures:
+            # 提交新任務 (如果執行緒池有空間且還有待處理任務)
+            while tasks_to_process and len(active_futures) < max_workers:
+                task = tasks_to_process.popleft()
+                logging.debug(f"提交任務: {os.path.basename(task.file_path)} (索引 {task.original_index}), 第 {task.current_retry_count + 1} 次嘗試")
+                future = executor.submit(
+                    process_single_file,
+                    task.file_path, task.original_index, duration, lang, model_name,
+                    save_raw, raw_dir, extra_prompt, task.segment_time_offset, preview
+                )
+                active_futures[future] = task
             
-            future = executor.submit(
-                process_single_file, 
-                file, idx, duration, lang, model_name, 
-                save_raw, raw_dir, extra_prompt, segment_time_offset, preview  # 傳入預覽參數
-            )
-            future_to_idx[future] = idx
-        
-        # 收集結果，確保按順序儲存
-        for future in concurrent.futures.as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                srt_content, raw_file = future.result()
-                transcripts[idx] = srt_content
-                if raw_file:
-                    raw_transcripts.append(raw_file)
-            except Exception as e:
-                logging.error(f"獲取索引 {idx} 的結果時發生錯誤: {e}", exc_info=True)
-    
-    # 過濾掉失敗的轉錄結果
-    transcripts = [t for t in transcripts if t is not None]
-    
-    logging.debug(f"所有音訊檔案轉錄完成，共 {len(transcripts)} 個成功轉錄結果")
-    
-    # 將原始轉錄結果合併為一個檔案
-    if save_raw and raw_transcripts:
+            if not active_futures: # 如果沒有活動任務，則跳出循環 (所有任務已處理完畢)
+                break
+
+            # 等待至少一個任務完成
+            done, _ = concurrent.futures.wait(active_futures.keys(), return_when=concurrent.futures.FIRST_COMPLETED)
+
+            for future in done:
+                task = active_futures.pop(future) # 從活動列表中移除已完成的任務
+                original_idx = task.original_index
+                file_basename = os.path.basename(task.file_path)
+
+                try:
+                    srt_content, raw_file_path = future.result()
+                    if srt_content is not None:
+                        transcripts_results[original_idx] = srt_content
+                        if raw_file_path:
+                            raw_transcripts_paths.append(raw_file_path)
+                        if task.current_retry_count > 0:
+                            logging.info(f"片段 {file_basename} (索引 {original_idx}) 在第 {task.current_retry_count + 1} 次嘗試後轉錄成功。")
+                        else:
+                            logging.debug(f"片段 {file_basename} (索引 {original_idx}) 首次嘗試轉錄成功。")
+                    else:
+                        # srt_content is None 代表 process_single_file 內部認定失敗
+                        raise Exception(f"process_single_file 返回 None，表示轉錄失敗")
+
+                except Exception as e:
+                    logging.warning(
+                        f"片段 {file_basename} (索引 {original_idx}) 第 {task.current_retry_count + 1} 次轉錄嘗試失敗。錯誤：{e}"
+                    )
+                    if task.current_retry_count < max_segment_retries:
+                        new_task = Task(task.file_path, original_idx, task.current_retry_count + 1, task.segment_time_offset)
+                        tasks_to_process.append(new_task) # 重新加入佇列以供重試
+                        logging.info(
+                            f"準備對片段 {file_basename} (索引 {original_idx}) 進行第 {new_task.current_retry_count + 1} 次重試 (共 {max_segment_retries + 1} 次嘗試)。"
+                        )
+                    else:
+                        logging.error(
+                            f"片段 {file_basename} (索引 {original_idx}) 在 {max_segment_retries + 1} 次嘗試後最終轉錄失敗。最後錯誤：{e}。將中止整個轉錄過程。"
+                        )
+                        overall_transcription_failed = True
+                        # 觸發中止
+                        break
+            
+            if overall_transcription_failed:
+                break # 跳出主 while 循環
+
+        if overall_transcription_failed:
+            logging.error("由於有片段最終轉錄失敗，整體轉錄任務已中止。正在取消剩餘任務...")
+            # 取消所有剩餘的 future (如果 executor 仍在運行)
+            # executor.shutdown(wait=False) # Python 3.9+ 可以用 cancel_futures=True
+            # 為了相容性，我們手動取消
+            for future_to_cancel in list(active_futures.keys()): # 使用 list 複製，因為字典會在迭代中修改
+                future_to_cancel.cancel()
+                active_futures.pop(future_to_cancel, None) # 從 active_futures 中移除
+            # 清空待處理任務
+            tasks_to_process.clear()
+            logging.info("所有剩餘的轉錄任務已嘗試取消。")
+            return None
+
+    # 如果執行到這裡，代表所有片段都成功了 (或者 all_files 為空)
+    if not all_files: # 處理空文件列表的情況
+        return []
+
+    # 檢查是否有任何 None 值殘留 (理論上不應該，因為失敗會提前返回 None)
+    if any(t is None for t in transcripts_results):
+        logging.error("轉錄完成，但結果列表中包含 None 值，這不符合預期。請檢查邏輯。")
+        # 即使發生這種情況，也嘗試返回已有的成功結果
+        successful_transcripts = [t for t in transcripts_results if t is not None]
+        if not successful_transcripts: # 如果過濾後全為 None，則返回 None
+             logging.error("所有轉錄結果均為 None，返回 None。")
+             return None
+        logging.warning(f"返回 {len(successful_transcripts)} 個部分成功的轉錄結果。")
+        return successful_transcripts
+
+
+    logging.info(f"所有音訊檔案轉錄完成，共 {len(transcripts_results)} 個成功轉錄結果。")
+
+    if save_raw and raw_transcripts_paths:
         combined_raw_file = os.path.join(raw_dir, "combined_raw.txt")
-        # 按照檔案名稱排序，確保正確的順序
-        raw_transcripts.sort()
+        raw_transcripts_paths.sort() # 確保合併時的順序
         with open(combined_raw_file, "w", encoding="utf-8") as f:
-            for idx, raw_file in enumerate(raw_transcripts):
-                with open(raw_file, "r", encoding="utf-8") as rf:
-                    f.write(f"=== 區塊 {idx+1} ===\n")
-                    f.write(rf.read())
-                    f.write("\n\n")
+            for idx, raw_file in enumerate(raw_transcripts_paths):
+                try:
+                    with open(raw_file, "r", encoding="utf-8") as rf:
+                        f.write(f"=== 區塊來自檔案: {os.path.basename(raw_file)} (原始順序 {idx+1}) ===\n") # 更明確的標頭
+                        f.write(rf.read())
+                        f.write("\n\n")
+                except Exception as e:
+                    logging.error(f"合併原始轉錄檔案 {raw_file} 時發生錯誤: {e}")
         logging.info(f"已合併所有原始轉錄結果至: {combined_raw_file}")
-    
-    return transcripts
+
+    return transcripts_results
 
 def direct_to_srt(transcript_text, time_offset=0):
     """
