@@ -1,8 +1,12 @@
+<div align="center">
+
 # 🎙️ Gemini ASR Transcription Tool
 
-A Python tool that uses Google Gemini API to transcribe video or audio files into SRT subtitle files. Supports multi-threading, file splitting, timestamp clipping, and custom prompts.
+**English** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-This tool leverages the powerful audio processing capabilities of Gemini 2.5 Pro, Google's advanced multimodal AI model, which excels at understanding and transcribing spoken content with high accuracy across multiple languages. 
+*A Python tool that uses Google Gemini API to transcribe video or audio files into SRT subtitle files.*
+
+</div>
 
 ## ✨ Features
 
