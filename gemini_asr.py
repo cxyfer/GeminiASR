@@ -808,25 +808,24 @@ def clip_and_transcribe(filepath, st=None, ed=None, skip_existing=False, **kwarg
 
 def process_directory(directory_path, skip_existing=False, **kwargs):
     """
-    處理目錄中的所有影片和音訊檔案。
+    處理目錄中的所有影片和音訊檔案，包含子目錄。
 
     Args:
         directory_path (str): 目錄路徑
         skip_existing (bool): 如果 SRT 已存在，是否跳過
         **kwargs: 傳遞給 main 或 clip_and_transcribe 函數的參數
     """
-    logging.info(f"處理目錄: {directory_path}")
+    logging.info(f"處理目錄 (包含子目錄): {directory_path}")
 
     # 支援的檔案類型
     video_extensions = [".mp4", ".avi", ".mkv"]
     audio_extensions = [".mp3", ".wav"]
     supported_extensions = video_extensions + audio_extensions
 
-    # 獲取目錄中的所有檔案
     files = []
-    for filename in os.listdir(directory_path):
-        filepath = os.path.join(directory_path, filename)
-        if os.path.isfile(filepath):
+    for root, _, filenames in os.walk(directory_path):
+        for filename in filenames:
+            filepath = os.path.join(root, filename)
             _, ext = os.path.splitext(filename)
             if ext.lower() in supported_extensions:
                 # Avoid processing generated SRT files
@@ -834,10 +833,10 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
                     files.append(filepath)
 
     if not files:
-        logging.warning("目錄中沒有找到支援的影片或音訊檔案")
+        logging.warning("目錄及其子目錄中沒有找到支援的影片或音訊檔案")
         return
 
-    logging.info(f"在目錄中找到 {len(files)} 個支援的檔案")
+    logging.info(f"在目錄及其子目錄中找到 {len(files)} 個支援的檔案")
 
     # 依次處理每個檔案
     for i, filepath in enumerate(files):
@@ -871,10 +870,11 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
                 start_time = 0
             logging.debug(f"將使用時間偏移量 {start_time} 秒進行轉錄")
             clip_and_transcribe(filepath, st=start_time, ed=end_time,
-                               skip_existing=skip_existing,
+                               skip_existing=skip_existing, # skip_existing is passed to clip_and_transcribe
                                **common_kwargs)
         else:
-            main(filepath, **common_kwargs)
+            # Pass skip_existing to main as well, though its own check will be based on the input filepath
+            main(filepath, skip_existing=skip_existing, **common_kwargs)
 
     logging.info("目錄處理完成")
 
