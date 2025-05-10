@@ -340,6 +340,7 @@ def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=1, **kwar
     extra_prompt = kwargs.get("extra_prompt", None)
     time_offset = kwargs.get("time_offset", 0)
     preview = kwargs.get("preview", False)
+    max_segment_retries = kwargs.get("max_segment_retries", 1)
 
     if raw_dir is None:
         base_dir = os.path.dirname(original_file)
@@ -695,8 +696,9 @@ def main(video_path, skip_existing=False, **kwargs):
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
     extra_prompt = kwargs.get("extra_prompt", None)
     time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
+    max_segment_retries = kwargs.get("max_segment_retries", 1) # Default to 1 if not provided
 
-    logging.debug(f"處理參數: 分段時長={duration}秒, 語言={lang}, 模型={model}, 保存原始轉錄={save_raw}, 最大工作執行緒數={max_workers}, 跳過已存在={skip_existing}, 時間偏移量={time_offset}秒")
+    logging.debug(f"處理參數: 分段時長={duration}秒, 語言={lang}, 模型={model}, 保存原始轉錄={save_raw}, 最大工作執行緒數={max_workers}, 跳過已存在={skip_existing}, 時間偏移量={time_offset}秒, 片段最大重試次數={max_segment_retries}")
 
     _, ext = os.path.splitext(video_path)
     output_file = video_path.replace(ext, ".srt")
@@ -723,7 +725,8 @@ def main(video_path, skip_existing=False, **kwargs):
                                     save_raw=save_raw, original_file=video_path,
                                     max_workers=max_workers,
                                     extra_prompt=extra_prompt,
-                                    time_offset=time_offset)  # 傳遞時間偏移量
+                                    time_offset=time_offset,
+                                    max_segment_retries=max_segment_retries) # 傳遞 max_segment_retries
 
         if not subs:
             logging.error("轉錄失敗，未獲得任何字幕")
@@ -859,6 +862,7 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
             "save_raw": kwargs.get("save_raw"),
             "max_workers": kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5)),
             "extra_prompt": kwargs.get("extra_prompt"),
+            "max_segment_retries": kwargs.get("max_segment_retries", 1), # Added max_segment_retries
         }
 
         # 檢查是否需要剪輯
@@ -894,6 +898,7 @@ if __name__ == "__main__":
     parser.add_argument("--extra-prompt", help="額外的提示詞 或 包含提示詞的檔案路徑", type=str)
     parser.add_argument("--ignore-keys-limit", help="忽略 API KEY 數量對最大工作執行緒數的限制", action="store_true")
     parser.add_argument("--preview", help="顯示原始轉錄結果預覽", action="store_true")
+    parser.add_argument("--max-segment-retries", help="每個音訊區塊轉錄失敗時的最大重試次數", type=int, default=3)
     args = parser.parse_args()
 
     # Set logging level
@@ -927,7 +932,8 @@ if __name__ == "__main__":
         "max_workers": args.max_workers,
         "extra_prompt": extra_prompt_value,
         "skip_existing": args.skip_existing,
-        "preview": args.preview
+        "preview": args.preview,
+        "max_segment_retries": args.max_segment_retries,
     }
 
     # Check if the input is a directory
