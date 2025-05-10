@@ -308,7 +308,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
     logging.error(f"處理 {file} 時發生錯誤: {last_error}", exc_info=True)
     return None, None
 
-def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=1, **kwargs):
+def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=3, **kwargs):
     """
     使用 Gemini 模型並行轉錄音訊檔案區塊。
 
