@@ -14,38 +14,15 @@ from google import genai
 from google.genai import types
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
+from utils.api_key_manager import key_manager
 
 load_dotenv()
-
-GOOGLE_API_KEYS = [key.strip() for key in os.getenv('GOOGLE_API_KEY', '').split(',') if key.strip()]
-if not GOOGLE_API_KEYS:
-    raise ValueError("未找到有效的 GOOGLE_API_KEY 環境變數")
 
 # 為確保多執行緒環境中的執行緒安全，創建一個執行緒本地存儲
 thread_local = threading.local()
 
 # 建立日誌鎖，確保日誌輸出互斥
 log_lock = threading.RLock()
-
-# 新增一個執行緒安全的鎖，用於管理 API KEY 列表
-api_keys_lock = threading.RLock()
-
-def get_random_api_key():
-    """從 API KEY 列表中隨機選取一個可用的金鑰"""
-    with api_keys_lock:
-        if not GOOGLE_API_KEYS:
-            logging.error("所有 API KEY 已超過使用限制，無法繼續處理")
-            raise ValueError("All API KEYs have exceeded their usage limit")
-        return random.choice(GOOGLE_API_KEYS)
-
-def remove_exhausted_key(key):
-    """將已限流的 API KEY 標記為不可用"""
-    with api_keys_lock:
-        if key in GOOGLE_API_KEYS:
-            GOOGLE_API_KEYS.remove(key)
-            logging.warning(f"API KEY (後6位: ...{key[-6:]}) 已超過使用限制，從可用池中移除。剩餘可用金鑰: {len(GOOGLE_API_KEYS)}")
-            return True
-        return False
 
 def setup_logging(level=logging.INFO):
     """設定日誌格式和級別"""
@@ -222,7 +199,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
         try:
             # 隨機選取一個 API KEY 並配置
             try:
-                current_key = get_random_api_key()
+                current_key = key_manager.get_key() # 使用新的管理器獲取金鑰
                 logging.debug(f"使用隨機選取的 API KEY (後6位: ...{current_key[-6:]})")
                 client = genai.Client(api_key=current_key)
             except ValueError as e:
@@ -292,7 +269,7 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             if "429" in error_message and current_key:
                 logging.warning(f"API KEY 限流錯誤: {error_message}")
                 # 標記當前 KEY 為已用盡
-                if remove_exhausted_key(current_key):
+                if key_manager.disable_key(current_key): # 使用新的管理器禁用金鑰
                     retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
                 
             retries += 1
@@ -336,7 +313,7 @@ def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=3, **kwar
     save_raw = kwargs.get("save_raw", False)
     raw_dir = kwargs.get("raw_dir", None)
     original_file = kwargs.get("original_file", "unknown")
-    max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
+    max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, key_manager.get_available_key_count()))
     extra_prompt = kwargs.get("extra_prompt", None)
     time_offset = kwargs.get("time_offset", 0)
     preview = kwargs.get("preview", False)
@@ -693,7 +670,7 @@ def main(video_path, skip_existing=False, **kwargs):
     lang = kwargs.get("lang", 'zh-TW')
     model = kwargs.get("model", "gemini-2.5-pro-exp-03-25")
     save_raw = kwargs.get("save_raw", False)
-    max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, len(GOOGLE_API_KEYS)))
+    max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, key_manager.get_available_key_count()))
     extra_prompt = kwargs.get("extra_prompt", None)
     time_offset = kwargs.get("time_offset", 0)  # 獲取時間偏移量，預設為0
     max_segment_retries = kwargs.get("max_segment_retries", 1) # Default to 1 if not provided
@@ -906,9 +883,9 @@ if __name__ == "__main__":
     setup_logging(log_level)
 
     logging.info("Gemini ASR 轉錄服務啟動")
-    logging.info(f"已載入 {len(GOOGLE_API_KEYS)} 個 API KEY")
+    logging.info(f"已載入 {key_manager.get_available_key_count()} 個 API KEY")
     if not args.ignore_keys_limit:
-        args.max_workers = min(args.max_workers, len(GOOGLE_API_KEYS))
+        args.max_workers = min(args.max_workers, key_manager.get_available_key_count())
     logging.info(f"並行轉錄設定: 最大工作執行緒數={args.max_workers}")
 
     extra_prompt_value = args.extra_prompt
