@@ -309,7 +309,7 @@ def transcribe_with_gemini(temp_dir, duration=300, max_segment_retries=3, **kwar
                       如果有任何區塊在用盡重試次數後仍然失敗，則返回 None。
     """
     lang = kwargs.get("lang", 'zh-TW')
-    model_name = kwargs.get("model", "gemini-2.5-pro-exp-03-25")
+    model_name = kwargs.get("model", "gemini-2.5-flash-preview-05-20")
     save_raw = kwargs.get("save_raw", False)
     raw_dir = kwargs.get("raw_dir", None)
     original_file = kwargs.get("original_file", "unknown")
@@ -668,7 +668,7 @@ def combine_subtitles(subtitles):
 def main(video_path, skip_existing=False, **kwargs):
     duration = kwargs.get("duration", 300)
     lang = kwargs.get("lang", 'zh-TW')
-    model = kwargs.get("model", "gemini-2.5-pro-exp-03-25")
+    model = kwargs.get("model", "gemini-2.5-flash-preview-05-20")
     save_raw = kwargs.get("save_raw", False)
     max_workers = kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5, key_manager.get_available_key_count()))
     extra_prompt = kwargs.get("extra_prompt", None)
@@ -835,7 +835,7 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
         common_kwargs = {
             "duration": kwargs.get("duration", 300),
             "lang": kwargs.get("lang", 'zh-TW'),
-            "model": kwargs.get("model", "gemini-2.5-pro-exp-03-25"),
+            "model": kwargs.get("model", "gemini-2.5-flash-preview-05-20"),
             "save_raw": kwargs.get("save_raw"),
             "max_workers": kwargs.get("max_workers", min(32, (os.cpu_count() or 1) * 5)),
             "extra_prompt": kwargs.get("extra_prompt"),
@@ -865,7 +865,7 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input", help="輸入的影片、音訊檔案或包含媒體檔案的資料夾", required=True)
     parser.add_argument("-d", "--duration", help="每個分段的時長（秒）", type=int, default=900)
     parser.add_argument("-l", "--lang", help="語言代碼", default="zh-TW")
-    parser.add_argument("-m", "--model", help="Gemini 模型", default="gemini-2.5-pro-exp-03-25")
+    parser.add_argument("-m", "--model", help="Gemini 模型", default="gemini-2.5-flash-preview-05-20")
     parser.add_argument("--start", help="開始時間（秒）", type=int)
     parser.add_argument("--end", help="結束時間（秒）", type=int)
     parser.add_argument("--save-raw", help="保存原始轉錄結果", action="store_true")
