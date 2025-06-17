@@ -18,6 +18,7 @@ from utils.api_key_manager import key_manager
 from utils.constants import *
 
 load_dotenv()
+BASE_URL = os.getenv("BASE_URL", "https://generativelanguage.googleapis.com/")
 
 # 為確保多執行緒環境中的執行緒安全，創建一個執行緒本地存儲
 thread_local = threading.local()
@@ -211,7 +212,8 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             try:
                 current_key = key_manager.get_key() # 使用新的管理器獲取金鑰
                 logger.debug(f"使用隨機選取的 API KEY (後6位: ...{current_key[-6:]})"   )
-                client = genai.Client(api_key=current_key)
+                client = genai.Client(api_key=current_key, 
+                                      http_options=types.HttpOptions(base_url=BASE_URL))
             except ValueError as e:
                 # 已經沒有可用的 API KEY
                 logger.error(f"無法獲取可用的 API KEY: {e}")
