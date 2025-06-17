@@ -233,8 +233,8 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
                 with open(file, 'rb') as f:  
                     file_bytes = f.read()
                 mime_type, _ = mimetypes.guess_type(file)  
-                if mime_type is None:  
-                    mime_type = 'application/octet-stream'
+                if mime_type is None:
+                    raise ValueError("Failed to guess the mime type of the file.")
                 uploaded_file = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
                 logger.debug(f"已成功上傳檔案 {file}")
             except Exception as e:
