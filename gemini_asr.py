@@ -8,6 +8,7 @@ import random
 import threading
 import concurrent.futures
 import collections
+import mimetypes
 
 import moviepy.editor as mp
 from google import genai
@@ -222,7 +223,19 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             # 先上傳音訊檔案
             try:
                 logger.debug(f"正在上傳音訊檔案 {file}")
-                uploaded_file = client.files.upload(file=file)
+                """
+                For some server side like gemini-balance, the file path is not implemented,
+                so we change from files endpoint to upload file by bytes directly.
+
+                Note:
+                - code execution should be closed if you use gemini-balance.
+                """
+                with open(file, 'rb') as f:  
+                    file_bytes = f.read()
+                mime_type, _ = mimetypes.guess_type(file)  
+                if mime_type is None:  
+                    mime_type = 'application/octet-stream'
+                uploaded_file = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
                 logger.debug(f"已成功上傳檔案 {file}")
             except Exception as e:
                 logger.error(f"上傳音訊檔案失敗: {e}")
