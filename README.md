@@ -22,6 +22,9 @@
 * ⏩ Provides `--skip-existing` option to avoid reprocessing files that already have subtitles.
 * 🐞 Supports DEBUG mode for detailed logging output.
 * 🌈 Uses colored logs for easy distinction between different message levels.
+* 🔗 Supports proxy or custom server side like gemini-balance.
+  * If you want to use gemini-balance, you need to set the `BASE_URL` environment variable to `https://your-custom-url.com/`.
+  * Note: **code execution should be closed** if you use gemini-balance.
 
 ## 🔧 Installation
 
