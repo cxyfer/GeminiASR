@@ -15,6 +15,7 @@ from google.genai import types
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 from utils.api_key_manager import key_manager
+from utils.constants import *
 
 load_dotenv()
 
@@ -78,7 +79,7 @@ def setup_logging(level=logging.INFO):
 
 def split_media(media_path, temp_dir, duration=300):
     """將視頻或音訊文件分割成較小的區段"""
-    is_video = True if media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) else False
+    is_video = True if media_path.lower().endswith(tuple(VIDEO_FILE_EXTENSIONS)) else False
     file_type = "影片" if is_video else "音訊"
     logger.debug(f"開始分割{file_type} {media_path}，分段時長: {duration} 秒")
     
@@ -696,10 +697,10 @@ def main(video_path, skip_existing=False, **kwargs):
 
     with tempfile.TemporaryDirectory() as temp_dir:
         logger.debug(f"創建臨時目錄: {temp_dir}")
-        if ext.lower() in [".mp4", ".avi", ".mkv"]:
+        if ext.lower() in VIDEO_FILE_EXTENSIONS:
             logger.info("檢測到影片檔案，開始分割音訊")
             split_media(video_path, temp_dir, duration=duration)
-        elif ext.lower() in [".mp3", ".wav"]:
+        elif ext.lower() in AUDIO_FILE_EXTENSIONS:
             logger.info("檢測到音訊檔案，開始分割")
             split_media(video_path, temp_dir, duration=duration)
         else:
@@ -742,6 +743,7 @@ def clip(filepath, st=None, ed=None):
     logger.debug(f"剪輯範圍: 開始={st if st is not None else '開頭'}, 結束={ed if ed is not None else '結尾'}")
     
     clip = mp.VideoFileClip(filepath)
+    ext = os.path.splitext(filepath)[1]
     logger.debug(f"原始影片時長: {clip.duration:.2f} 秒")
     
     if st is not None or ed is not None:
@@ -751,10 +753,10 @@ def clip(filepath, st=None, ed=None):
             ed = int(clip.duration)
         logger.info(f"剪輯影片，範圍: {st}-{ed} 秒")
         clip = clip.subclip(st, ed)
-        newpath = filepath.replace(".mp4", f"_{st}-{ed}.mp3")
+        newpath = filepath.replace(ext, f"_{st}-{ed}.mp3")
     else:
         logger.info("提取完整影片的音訊")
-        newpath = filepath.replace(".mp4", ".mp3")
+        newpath = filepath.replace(ext, ".mp3")
         
     logger.debug(f"開始提取音訊到: {newpath}")
     clip.audio.write_audiofile(newpath, verbose=False, logger=None)
@@ -807,9 +809,7 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
     logger.info(f"處理目錄 (包含子目錄): {directory_path}")
 
     # 支援的檔案類型
-    video_extensions = [".mp4", ".avi", ".mkv"]
-    audio_extensions = [".mp3", ".wav"]
-    supported_extensions = video_extensions + audio_extensions
+    supported_extensions = VIDEO_FILE_EXTENSIONS + AUDIO_FILE_EXTENSIONS
 
     files = []
     for root, _, filenames in os.walk(directory_path):
