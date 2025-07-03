@@ -14,9 +14,13 @@ import moviepy.editor as mp
 from google import genai
 from google.genai import types
 from langchain.prompts import PromptTemplate
+from dotenv import load_dotenv
 from utils.api_key_manager import key_manager
 from utils.config_manager import config_manager
 from utils.constants import *
+
+# 載入 .env 文件（如果存在）
+load_dotenv()
 
 # 使用配置管理器取得 BASE_URL
 BASE_URL = config_manager.get_base_url()
@@ -912,7 +916,7 @@ if __name__ == "__main__":
     args_dict = {k: v for k, v in vars(args).items() if v is not None and v is not False}
     
     # 使用配置管理器合併所有配置來源
-    config = config_manager.get_merged_config(args=args_dict)
+    config = config_manager.get_merged_config(args=args_dict, env_vars=os.environ)
     
     # 設定日誌級別
     log_level = logging.DEBUG if config.get('debug', False) else logging.INFO
