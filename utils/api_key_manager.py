@@ -83,12 +83,13 @@ class ApiKeyManager:
             logging.debug(f"Providing API KEY (last 6 chars: ...{key[-6:]}).")
             return key
 
-    def disable_key(self, key):
+    def disable_key(self, key, reason="unknown"):
         """
         Removes a key from the pool, e.g., when it's exhausted or invalid.
 
         Args:
             key (str): The key to remove.
+            reason (str): The reason for disabling the key (e.g., "rate_limit", "banned", "unknown").
 
         Returns:
             bool: True if the key was successfully removed, False otherwise.
@@ -96,10 +97,24 @@ class ApiKeyManager:
         with self._lock:
             if key in self._api_keys:
                 self._api_keys.remove(key)
-                logging.warning(
-                    f"API KEY (last 6 chars: ...{key[-6:]}) has been marked as unusable and removed from the pool. "
-                    f"Remaining keys: {len(self._api_keys)}"
-                )
+                
+                # 根據錯誤類型選擇適當的日誌級別和消息
+                if reason == "rate_limit":
+                    logging.warning(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) hit rate limit (429) and removed from pool. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                elif reason == "banned":
+                    logging.error(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) is banned/forbidden (403) and permanently removed. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                else:
+                    logging.warning(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) disabled due to {reason}. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                
                 return True
             return False
 

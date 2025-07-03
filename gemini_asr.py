@@ -290,12 +290,18 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             last_error = e
             error_message = str(e)
             
-            # 檢查是否為配額限制錯誤 (429)
-            if "429" in error_message and current_key:
-                logger.warning(f"API KEY 限流錯誤: {error_message}")
-                # 標記當前 KEY 為已用盡
-                if key_manager.disable_key(current_key): # 使用新的管理器禁用金鑰
-                    retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
+            # 檢查 API KEY 相關錯誤
+            if current_key and ("429" in error_message or "403" in error_message):
+                if "429" in error_message:
+                    logger.warning(f"API KEY 限流錯誤 (429): {error_message}")
+                    # 標記當前 KEY 為已用盡（暫時）
+                    if key_manager.disable_key(current_key, reason="rate_limit"):
+                        retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
+                elif "403" in error_message:
+                    logger.error(f"API KEY 被禁用 (403): {error_message}")
+                    # 標記當前 KEY 為已被 BAN（永久）
+                    if key_manager.disable_key(current_key, reason="banned"):
+                        retries -= 1  # 如果成功移除被 BAN 的金鑰，不計入重試次數
                 
             retries += 1
             
