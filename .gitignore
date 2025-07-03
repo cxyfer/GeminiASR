@@ -173,8 +173,12 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Claude Code
+.claude/
+
 # Custom
 prompt.md
+config.toml
 *.srt
 *.txt
 *.log
