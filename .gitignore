@@ -175,6 +175,7 @@ cython_debug/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Custom
 prompt.md
