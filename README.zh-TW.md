@@ -8,14 +8,6 @@
 
 </div>
 
----
-
-# 🎙️ Gemini ASR 語音轉文字工具
-
-A Python tool that uses Google Gemini API to transcribe video or audio files into SRT subtitle files. 支援多執行緒、檔案分割、時間戳記剪輯和自訂提示詞。
-
-這個工具利用了 Google 先進的多模態 AI 模型 Gemini 2.5 Pro 強大的音訊處理能力，它在理解和轉錄多種語言的口語內容方面表現出色，準確率很高。
-
 ## ✨ 功能
 
 * 🎥 支援各種影片 (mp4, avi, mkv) 和音訊 (mp3, wav) 格式。
@@ -30,6 +22,13 @@ A Python tool that uses Google Gemini API to transcribe video or audio files int
 * ⏩ 提供 `--skip-existing` 選項，以避免重新處理已經有字幕的檔案。
 * 🐞 支援 DEBUG 模式，用於詳細的日誌輸出。
 * 🌈 使用彩色日誌，方便區分不同級別的訊息。
+* 🔗 支援代理伺服器或自訂伺服器端，如 gemini-balance。
+  * 如果您想使用 gemini-balance，需要設定 `BASE_URL` 環境變數為 `https://your-custom-url.com/`。
+  * 注意：如果您使用 gemini-balance，**必須關閉程式碼執行功能**。
+* ⚙️ **TOML 配置支援**：綜合的配置管理系統，支援多種配置來源。
+  * 📝 支援配置檔案，並在多個位置自動搜尋
+  * 🔄 多來源配置合併 (命令列 > TOML > 環境變數 > 預設值)
+  * 🎛️ 在單一配置檔案中輕鬆管理所有設定
 
 ## 🔧 安裝
 
@@ -48,15 +47,81 @@ uv run gemini_asr.py -i video.mp4
 
 這將自動安裝所有所需的依賴並執行腳本。
 
-### 🔑 API Key
+### 🔑 API Key 配置
 
 1. **獲取 Google API Key:** 前往 [Google AI Studio](https://aistudio.google.com/app/apikey) 獲取您的 API Key。您可以獲取多個 Key 以提高處理效率。
-2. **設定環境變數:**
-   * 在專案根目錄中建立一個名為 `.env` 的檔案。
-   * 在 `.env` 檔案中加入您的 API Key(s)，多個 Key 使用逗號分隔：
-     ```env
-     GOOGLE_API_KEY=YOUR_API_KEY_1,YOUR_API_KEY_2,YOUR_API_KEY_3
-     ```
+
+2. **配置方式** (選擇其中一種):
+
+   **方式 A：TOML 配置檔案 (推薦)**
+   ```bash
+   # 複製範例配置檔案
+   cp config.example.toml config.toml
+   
+   # 編輯 config.toml 並添加您的 API Key
+   nano config.toml
+   ```
+   
+   在 `config.toml` 中：
+   ```toml
+   [api]
+   google_api_keys = ["YOUR_API_KEY_1", "YOUR_API_KEY_2", "YOUR_API_KEY_3"]
+   ```
+
+   **方式 B：環境變數**
+   ```bash
+   # 設定環境變數，多個 Key 使用逗號分隔
+   export GOOGLE_API_KEY=YOUR_API_KEY_1,YOUR_API_KEY_2,YOUR_API_KEY_3
+   ```
+
+   **方式 C：.env 檔案**
+   ```bash
+   # 在專案根目錄建立 .env 檔案
+   echo "GOOGLE_API_KEY=YOUR_API_KEY_1,YOUR_API_KEY_2,YOUR_API_KEY_3" > .env
+   ```
+
+### ⚙️ 配置系統
+
+GeminiASR 支援靈活的配置系統，優先順序如下：
+1. **命令列參數** (最高優先級)
+2. **TOML 配置檔案**
+3. **環境變數**
+4. **預設值** (最低優先級)
+
+**配置檔案搜尋位置** (依序搜尋):
+- `./config.toml` (目前目錄)
+- `./.geminiasr/config.toml`
+- `~/.geminiasr/config.toml`
+- `~/.config/geminiasr/config.toml`
+
+**配置檔案範例** (`config.toml`):
+```toml
+# 轉錄設定
+[transcription]
+duration = 900           # 片段持續時間 (秒)
+lang = "zh-TW"          # 語言代碼
+model = "gemini-2.5-flash"  # Gemini 模型
+skip_existing = true     # 跳過已有 SRT 檔案
+max_segment_retries = 3  # 每個片段最大重試次數
+
+# 處理設定
+[processing]
+max_workers = 24         # 最大並行執行緒數
+ignore_keys_limit = true # 忽略 API Key 限制
+
+# 日誌設定
+[logging]
+debug = true            # 啟用除錯日誌
+
+# API 設定
+[api]
+google_api_keys = ["key1", "key2", "key3"]
+
+# 進階設定
+[advanced]
+extra_prompt = "prompt.md"  # 提示詞檔案路徑
+base_url = "https://generativelanguage.googleapis.com/"
+```
 
 ## 📋 使用方法
 
@@ -91,71 +156,55 @@ arguments:
   --ignore-keys-limit   忽略對最大工作執行緒數的 API Key 數量限制
 ```
 
-### 💡 範例
+### 💡 使用範例
 
-1. **基本使用 - 轉錄影片檔案:**
+1. **使用 TOML 配置 (推薦):**
    ```bash
-   python gemini_asr.py -i video.mp4
+   # 所有設定從 config.toml 讀取 - 僅需指定輸入檔案
+   uv run gemini_asr.py -i video.mp4
+   
+   # 使用 TOML 設定處理整個目錄
+   uv run gemini_asr.py -i /path/to/media/folder
    ```
 
-2. **轉錄影片並使用自訂片段持續時間 (5 分鐘):**
+2. **傳統命令列使用:**
    ```bash
-   python gemini_asr.py -i video.mp4 -d 300
-   ```
-
-3. **僅轉錄影片的某一部分 (從 60 秒到 180 秒):**
-   ```bash
-   python gemini_asr.py -i video.mp4 --start 60 --end 180
-   ```
-
-4. **處理目錄中的所有媒體檔案:**
-   ```bash
-   python gemini_asr.py -i /path/to/media/folder
-   ```
-
-5. **使用特定語言:**
-   ```bash
-   python gemini_asr.py -i video.mp4 -l en
-   ```
-
-6. **使用自訂提示詞改善轉錄:**
-   ```bash
-   python gemini_asr.py -i lecture.mp4 --extra-prompt "This is a technical lecture about machine learning."
-   ```
-
-7. **跳過已經有 SRT 字幕的檔案:**
-   ```bash
-   python gemini_asr.py -i /path/to/media/folder --skip-existing
-   ```
-
-8. **儲存原始轉錄結果以供後續審查:**
-   ```bash
-   python gemini_asr.py -i interview.mp4 --save-raw
-   ```
-
-9. **啟用調試日誌記錄以進行故障排除:**
-   ```bash
-   python gemini_asr.py -i video.mp4 --debug
+   # 基本轉錄
+   uv run gemini_asr.py -i video.mp4
+   
+   # 自訂設定
+   uv run gemini_asr.py -i video.mp4 -d 300 --debug
    ```
 
 ## 🔍 音訊處理技術細節
 
+> [!NOTE]
+> 舊的預設模型 (`gemini-2.5-pro`) 是免費的但有一些限制。現在預設模型是 `gemini-2.5-flash`。
+
 * 🧮 **Token 使用量**: Gemini 每秒音訊使用 32 個 token (1,920 tokens/分鐘)。有關音訊處理能力的更多詳細資訊，請參閱 [Gemini 音訊文件](https://ai.google.dev/gemini-api/docs/audio)。
-* 📈 **輸出 Token**: Gemini 2.5 Pro 每個請求的輸出 token 限制為 65,536 個，這會影響可處理音訊的最大持續時間。有關詳細資訊，請參閱 [Gemini 模型文件](https://ai.google.dev/gemini-api/docs/models#gemini-2.5-pro-preview-03-25)。
-* 📊 **速率限制**: 預設模型 (`gemini-2.5-pro-exp-03-25`) 在預覽期間是免費的，但受特定限制：250,000 TPM (每分鐘 token)，1,000,000 TPD (每天 token)，5 RPM (每分鐘請求) 和 25 RPM (每分鐘請求)。有關詳細資訊，請參閱 [速率限制文件](https://ai.google.dev/gemini-api/docs/rate-limits)。
+* 📈 **輸出 Token**: Gemini 2.5 Pro/Flash 每個請求的輸出 token 限制為 65,536 個，這會影響可處理音訊的最大持續時間。有關詳細資訊，請參閱 [Gemini 模型文件](https://ai.google.dev/gemini-api/docs/models)。
+* 📊 **速率限制**: 預設模型 (`gemini-2.5-pro`) 在預覽期間是免費的，但受特定限制：250,000 TPM (每分鐘 token)，5 RPM (每分鐘請求) 和 100 RPD (每天請求)。有關詳細資訊，請參閱 [速率限制文件](https://ai.google.dev/gemini-api/docs/rate-limits)。
 * 💰 **定價**: 付費層每百萬 token 費用為 $1.25 (≤200k token) 或 $2.50 (>200k token)。對於超過 2 小時的音訊，建議分割檔案以避免過多的 token 使用量和潛在的成本超支。有關完整的定價資訊，請參閱 [Gemini 開發者 API 定價](https://ai.google.dev/gemini-api/docs/pricing)。
 
 ## 📝 注意事項
 
-* 腳本使用 Gemini API，該 API 有使用限制，並可能在免費層之外產生費用。
+### 🔑 配置最佳實務
+* **TOML 配置**：使用 `config.toml` 進行持久化設定。這是日常使用的推薦方式。
+* **命令列覆蓋**：使用 CLI 參數暫時覆蓋 TOML 設定以進行特定運行。
+* **多個 API Key**：在 TOML 或環境變數中配置多個 API Key 以獲得更好的效能。
+
+### ⚡ 效能最佳化
 * 為了獲得最佳效能，請考慮：
-  * 🔑 使用多個 API Key (在 .env 檔案中使用逗號分隔)
+  * 🔑 使用多個 API Key (在 `config.toml` 或環境變數中配置)
   * ⏱️ 根據內容複雜性調整片段持續時間 — **將片段保持在 60 分鐘以下**，以避免輸出 token 限制，並維持免費層使用者的 TPM 限制
-  * 🧵 根據系統能力和可用 API Key 的數量適當配置 max-workers
-  * 🚫 `--ignore-keys-limit` 選項應謹慎使用，主要供付費層使用者使用，以避免觸及免費層嚴格的 TPM 限制
-* ⚠️ 如果您遇到 429 (請求過多) 錯誤，請嘗試減少 max-workers 的數量，添加更多 API Key，或升級到付費層
-* 💲 付費層使用者應使用 `gemini-2.5-pro-preview-03-25` 模型，並且由於更高的 TPM 額度，可以安全地使用 `--ignore-keys-limit` 選項。
+  * 🧵 根據系統能力和可用 API Key 的數量在 TOML 中適當配置 max-workers
+  * 🚫 `ignore_keys_limit` 設定應謹慎使用，主要供付費層使用者使用，以避免觸及免費層嚴格的 TPM 限制
 
----
+### 🚨 故障排除
+* ⚠️ 如果您遇到 429 (請求過多) 錯誤，請嘗試在 config.toml 中減少 `max_workers` 設定，添加更多 API Key，或升級到付費層
+* 💲 付費層使用者應使用 `gemini-2.5-pro` 模型，並且由於更高的 TPM 額度，可以安全地啟用 `ignore_keys_limit` 選項
+* 🐛 在 config.toml 中使用 `debug = true` 或 `--debug` 標誌以查看詳細的配置和處理資訊
 
-**其他語言:** [English](README.md) | [简体中文](README.zh-CN.md) 
+### 💰 成本管理
+* 腳本使用 Gemini API，該 API 有使用限制，並可能在免費層之外產生費用。
+* 啟用除錯模式時，透過詳細的配置日誌監控您的 token 使用量。

@@ -16,10 +16,14 @@ from google.genai import types
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 from utils.api_key_manager import key_manager
+from utils.config_manager import config_manager
 from utils.constants import *
 
+# 載入 .env 文件（如果存在）
 load_dotenv()
-BASE_URL = os.getenv("BASE_URL", "https://generativelanguage.googleapis.com/")
+
+# 使用配置管理器取得 BASE_URL
+BASE_URL = config_manager.get_base_url()
 
 # 為確保多執行緒環境中的執行緒安全，創建一個執行緒本地存儲
 thread_local = threading.local()
@@ -290,12 +294,18 @@ def process_single_file(file, idx, duration, lang, model_name, save_raw, raw_dir
             last_error = e
             error_message = str(e)
             
-            # 檢查是否為配額限制錯誤 (429)
-            if "429" in error_message and current_key:
-                logger.warning(f"API KEY 限流錯誤: {error_message}")
-                # 標記當前 KEY 為已用盡
-                if key_manager.disable_key(current_key): # 使用新的管理器禁用金鑰
-                    retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
+            # 檢查 API KEY 相關錯誤
+            if current_key and ("429" in error_message or "403" in error_message):
+                if "429" in error_message:
+                    logger.warning(f"API KEY 限流錯誤 (429): {error_message}")
+                    # 標記當前 KEY 為已用盡（暫時）
+                    if key_manager.disable_key(current_key, reason="rate_limit"):
+                        retries -= 1  # 如果成功移除限流金鑰，不計入重試次數
+                elif "403" in error_message:
+                    logger.error(f"API KEY 被禁用 (403): {error_message}")
+                    # 標記當前 KEY 為已被 BAN（永久）
+                    if key_manager.disable_key(current_key, reason="banned"):
+                        retries -= 1  # 如果成功移除被 BAN 的金鑰，不計入重試次數
                 
             retries += 1
             
@@ -887,65 +897,87 @@ def process_directory(directory_path, skip_existing=False, **kwargs):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="使用 Google Gemini 為影片或音訊生成字幕")
     parser.add_argument("-i", "--input", help="輸入的影片、音訊檔案或包含媒體檔案的資料夾", required=True)
-    parser.add_argument("-d", "--duration", help="每個分段的時長（秒）", type=int, default=900)
-    parser.add_argument("-l", "--lang", help="語言代碼", default="zh-TW")
-    parser.add_argument("-m", "--model", help="Gemini 模型", default="gemini-2.5-flash-preview-05-20")
+    parser.add_argument("-d", "--duration", help="每個分段的時長（秒）", type=int)
+    parser.add_argument("-l", "--lang", help="語言代碼")
+    parser.add_argument("-m", "--model", help="Gemini 模型")
     parser.add_argument("--start", help="開始時間（秒）", type=int)
     parser.add_argument("--end", help="結束時間（秒）", type=int)
     parser.add_argument("--save-raw", help="保存原始轉錄結果", action="store_true")
     parser.add_argument("--skip-existing", help="如果 SRT 字幕檔案已存在，則跳過處理", action="store_true")
     parser.add_argument("--debug", help="啟用 DEBUG 級別日誌", action="store_true")
-    parser.add_argument("--max-workers", help="最大工作執行緒數 (預設情況下不能超過 GOOGLE_API_KEYS 的數量)", type=int, default=min(32, (os.cpu_count() or 1) * 5))
+    parser.add_argument("--max-workers", help="最大工作執行緒數", type=int)
     parser.add_argument("--extra-prompt", help="額外的提示詞 或 包含提示詞的檔案路徑", type=str)
     parser.add_argument("--ignore-keys-limit", help="忽略 API KEY 數量對最大工作執行緒數的限制", action="store_true")
     parser.add_argument("--preview", help="顯示原始轉錄結果預覽", action="store_true")
-    parser.add_argument("--max-segment-retries", help="每個音訊區塊轉錄失敗時的最大重試次數", type=int, default=3)
+    parser.add_argument("--max-segment-retries", help="每個音訊區塊轉錄失敗時的最大重試次數", type=int)
     args = parser.parse_args()
 
-    # Set logging level
-    log_level = logging.DEBUG if args.debug else logging.INFO
+    # 將命令列參數轉換為字典，排除 None 值和 False 值（這樣 TOML 中的 True 值就不會被覆蓋）
+    args_dict = {k: v for k, v in vars(args).items() if v is not None and v is not False}
+    
+    # 使用配置管理器合併所有配置來源
+    config = config_manager.get_merged_config(args=args_dict, env_vars=os.environ)
+    
+    # 設定日誌級別
+    log_level = logging.DEBUG if config.get('debug', False) else logging.INFO
     setup_logging(log_level)
 
     logger.info("Gemini ASR 轉錄服務啟動")
+    
+    # 顯示所有配置設定
+    config_manager.log_config_details(config, logger)
+    
     logger.info(f"已載入 {key_manager.get_available_key_count()} 個 API KEY")
-    if not args.ignore_keys_limit:
-        args.max_workers = min(args.max_workers, key_manager.get_available_key_count())
-    logger.info(f"並行轉錄設定: 最大工作執行緒數={args.max_workers}")
+    
+    # 計算最大工作執行緒數
+    max_workers = config.get('max_workers')
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) * 5)
+    
+    if not config.get('ignore_keys_limit', False):
+        max_workers = min(max_workers, key_manager.get_available_key_count())
+    
+    config['max_workers'] = max_workers
+    logger.info(f"並行轉錄設定: 最大工作執行緒數={max_workers}")
 
-    extra_prompt_value = args.extra_prompt
+    # 處理額外提示詞
+    extra_prompt_value = config.get('extra_prompt')
     if extra_prompt_value and os.path.isfile(extra_prompt_value):
         try:
             with open(extra_prompt_value, 'r', encoding='utf-8') as f:
                 extra_prompt_value = f.read().strip()
-            logger.info(f"已從檔案 '{args.extra_prompt}' 讀取額外提示詞。")
+            logger.info(f"已從檔案 '{config.get('extra_prompt')}' 讀取額外提示詞。")
         except Exception as e:
-            logger.warning(f"無法讀取提示詞檔案 '{args.extra_prompt}': {e}。將忽略額外提示詞。")
+            logger.warning(f"無法讀取提示詞檔案 '{config.get('extra_prompt')}': {e}。將忽略額外提示詞。")
             extra_prompt_value = None
+    
     if extra_prompt_value:
         logger.info(f"使用額外提示詞：\n{extra_prompt_value}")
+        config['extra_prompt'] = extra_prompt_value
 
-    # Create a dictionary of arguments to pass to functions
+    # 創建函數參數字典
     func_kwargs = {
-        "duration": args.duration,
-        "lang": args.lang,
-        "model": args.model,
-        "save_raw": args.save_raw,
-        "max_workers": args.max_workers,
-        "extra_prompt": extra_prompt_value,
-        "skip_existing": args.skip_existing,
-        "preview": args.preview,
-        "max_segment_retries": args.max_segment_retries,
+        "duration": config.get('duration', 900),
+        "lang": config.get('lang', 'zh-TW'),
+        "model": config.get('model', 'gemini-2.5-flash-preview-05-20'),
+        "save_raw": config.get('save_raw', False),
+        "max_workers": config.get('max_workers', max_workers),
+        "extra_prompt": config.get('extra_prompt'),
+        "skip_existing": config.get('skip_existing', False),
+        "preview": config.get('preview', False),
+        "max_segment_retries": config.get('max_segment_retries', 3),
     }
 
-    # Check if the input is a directory
-    if os.path.isdir(args.input):
+    # 檢查輸入是否為資料夾
+    input_path = config.get('input') or args.input
+    if os.path.isdir(input_path):
         logger.info("輸入是資料夾，將處理資料夾中的所有支援媒體檔案")
-        process_directory(args.input, start=args.start, end=args.end, **func_kwargs) # Pass skip_existing via func_kwargs
+        process_directory(input_path, start=config.get('start'), end=config.get('end'), **func_kwargs)
     else:
-        # Original logic for processing a single file
-        if args.start is not None or args.end is not None:
-            clip_and_transcribe(args.input, st=args.start, ed=args.end, **func_kwargs) # Pass skip_existing via func_kwargs
+        # 處理單個檔案
+        if config.get('start') is not None or config.get('end') is not None:
+            clip_and_transcribe(input_path, st=config.get('start'), ed=config.get('end'), **func_kwargs)
         else:
-            main(args.input, **func_kwargs) # Pass skip_existing via func_kwargs
+            main(input_path, **func_kwargs)
 
     logger.info("處理完成")

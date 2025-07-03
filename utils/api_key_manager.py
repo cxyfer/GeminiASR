@@ -2,6 +2,7 @@ import os
 import random
 import threading
 import logging
+from .config_manager import config_manager
 
 class ApiKeyManager:
     """
@@ -19,12 +20,12 @@ class ApiKeyManager:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, source='env', config_path=None):
+    def __init__(self, source='auto', config_path=None):
         """
         Initializes the ApiKeyManager.
 
         Args:
-            source (str): The source of the keys, can be 'env' (environment variables) or 'config' (config file).
+            source (str): The source of the keys, can be 'auto' (config manager), 'env' (environment variables) or 'config' (config file).
             config_path (str, optional): The path to the config file if the source is 'config'.
         """
         # Prevent re-initialization
@@ -35,7 +36,9 @@ class ApiKeyManager:
         self._lock = threading.RLock()
         self._initialized = True
 
-        if source == 'env':
+        if source == 'auto':
+            self._load_from_config_manager()
+        elif source == 'env':
             self._load_from_env()
         elif source == 'config' and config_path:
             self._load_from_config(config_path)
@@ -47,6 +50,18 @@ class ApiKeyManager:
             raise ValueError("No valid GOOGLE_API_KEY could be loaded.")
             
         logging.info(f"ApiKeyManager initialized, successfully loaded {len(self._api_keys)} API KEYs.")
+
+    def _load_from_config_manager(self):
+        """Loads keys from the config manager (supports both TOML and environment variables)."""
+        try:
+            self._api_keys = config_manager.get_api_keys()
+            if self._api_keys:
+                logging.debug(f"Successfully loaded {len(self._api_keys)} keys from config manager.")
+            else:
+                logging.warning("No API keys found in config manager.")
+        except Exception as e:
+            logging.error(f"Error loading keys from config manager: {e}")
+            self._api_keys = []
 
     def _load_from_env(self):
         """Loads keys from the GOOGLE_API_KEY environment variable."""
@@ -83,12 +98,13 @@ class ApiKeyManager:
             logging.debug(f"Providing API KEY (last 6 chars: ...{key[-6:]}).")
             return key
 
-    def disable_key(self, key):
+    def disable_key(self, key, reason="unknown"):
         """
         Removes a key from the pool, e.g., when it's exhausted or invalid.
 
         Args:
             key (str): The key to remove.
+            reason (str): The reason for disabling the key (e.g., "rate_limit", "banned", "unknown").
 
         Returns:
             bool: True if the key was successfully removed, False otherwise.
@@ -96,10 +112,24 @@ class ApiKeyManager:
         with self._lock:
             if key in self._api_keys:
                 self._api_keys.remove(key)
-                logging.warning(
-                    f"API KEY (last 6 chars: ...{key[-6:]}) has been marked as unusable and removed from the pool. "
-                    f"Remaining keys: {len(self._api_keys)}"
-                )
+                
+                # 根據錯誤類型選擇適當的日誌級別和消息
+                if reason == "rate_limit":
+                    logging.warning(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) hit rate limit (429) and removed from pool. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                elif reason == "banned":
+                    logging.error(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) is banned/forbidden (403) and permanently removed. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                else:
+                    logging.warning(
+                        f"API KEY (last 6 chars: ...{key[-6:]}) disabled due to {reason}. "
+                        f"Remaining keys: {len(self._api_keys)}"
+                    )
+                
                 return True
             return False
 
