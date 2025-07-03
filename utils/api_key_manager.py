@@ -2,6 +2,7 @@ import os
 import random
 import threading
 import logging
+from .config_manager import config_manager
 
 class ApiKeyManager:
     """
@@ -19,12 +20,12 @@ class ApiKeyManager:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, source='env', config_path=None):
+    def __init__(self, source='auto', config_path=None):
         """
         Initializes the ApiKeyManager.
 
         Args:
-            source (str): The source of the keys, can be 'env' (environment variables) or 'config' (config file).
+            source (str): The source of the keys, can be 'auto' (config manager), 'env' (environment variables) or 'config' (config file).
             config_path (str, optional): The path to the config file if the source is 'config'.
         """
         # Prevent re-initialization
@@ -35,7 +36,9 @@ class ApiKeyManager:
         self._lock = threading.RLock()
         self._initialized = True
 
-        if source == 'env':
+        if source == 'auto':
+            self._load_from_config_manager()
+        elif source == 'env':
             self._load_from_env()
         elif source == 'config' and config_path:
             self._load_from_config(config_path)
@@ -47,6 +50,18 @@ class ApiKeyManager:
             raise ValueError("No valid GOOGLE_API_KEY could be loaded.")
             
         logging.info(f"ApiKeyManager initialized, successfully loaded {len(self._api_keys)} API KEYs.")
+
+    def _load_from_config_manager(self):
+        """Loads keys from the config manager (supports both TOML and environment variables)."""
+        try:
+            self._api_keys = config_manager.get_api_keys()
+            if self._api_keys:
+                logging.debug(f"Successfully loaded {len(self._api_keys)} keys from config manager.")
+            else:
+                logging.warning("No API keys found in config manager.")
+        except Exception as e:
+            logging.error(f"Error loading keys from config manager: {e}")
+            self._api_keys = []
 
     def _load_from_env(self):
         """Loads keys from the GOOGLE_API_KEY environment variable."""

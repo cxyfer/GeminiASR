@@ -1,0 +1,37 @@
+# GeminiASR 配置文件範例
+# 複製此文件為 config.toml 並根據需要修改設定值
+# 配置文件搜索順序：
+# 1. 當前目錄/config.toml
+# 2. 當前目錄/.geminiasr/config.toml
+# 3. ~/.geminiasr/config.toml
+# 4. ~/.config/geminiasr/config.toml
+
+# 轉錄相關設定
+[transcription]
+duration = 900
+lang = "zh-TW"
+model = "gemini-2.5-flash"
+save_raw = false
+skip_existing = true
+preview = false
+max_segment_retries = 3
+
+# 處理相關設定
+[processing]
+# max_workers = null  # 留空表示使用根據 CPU 核心數計算的值
+ignore_keys_limit = false
+
+# 日誌相關設定
+[logging]
+debug = false
+
+# API 設定
+[api]
+# Google API Keys，多個 API KEY 用逗號分隔
+# 例如: google_api_keys = ["key1", "key2", "key3"]
+google_api_keys = []
+
+# 進階設定
+[advanced]
+# extra_prompt = null  # 留空表示不使用額外提示詞
+base_url = "https://generativelanguage.googleapis.com/"
