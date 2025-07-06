@@ -216,17 +216,25 @@ class ConfigManager:
         Returns:
             List[str]: API 金鑰列表
         """
-        # 1. 從 TOML 配置取得
+        # 1. 從環境變數取得（包括 .env 文件）
+        env_keys = []
+        
+        # 嘗試載入 .env 文件
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+        
+        env_keys_str = os.getenv('GOOGLE_API_KEY', '')
+        if env_keys_str:
+            env_keys = [key.strip() for key in env_keys_str.split(',') if key.strip()]
+        
+        # 2. 從 TOML 配置取得
         config = self.load_config()
         toml_keys = []
         if 'api' in config and 'google_api_keys' in config['api']:
             toml_keys = config['api']['google_api_keys']
-        
-        # 2. 從環境變數取得
-        env_keys = []
-        env_keys_str = os.getenv('GOOGLE_API_KEY', '')
-        if env_keys_str:
-            env_keys = [key.strip() for key in env_keys_str.split(',') if key.strip()]
         
         # 3. 優先使用 TOML 配置，如果沒有則使用環境變數
         if toml_keys:
@@ -246,6 +254,13 @@ class ConfigManager:
         Returns:
             str: API 基礎 URL
         """
+        # 嘗試載入 .env 文件
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+            
         # 1. 檢查環境變數（優先級高於 TOML）
         env_base_url = os.getenv('BASE_URL')
         if env_base_url:
