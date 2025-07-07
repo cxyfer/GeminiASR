@@ -19,6 +19,7 @@ class ConfigManager:
         self.logger = logging.getLogger('gemini_asr.config')
         self._config = {}
         self._config_loaded = False
+        self._env_loaded = False
         
     def load_config(self) -> Dict[str, Any]:
         """
@@ -209,23 +210,39 @@ class ConfigManager:
         # 只移除 None 值，保留 False 和其他有效值
         return {k: v for k, v in flattened.items() if v is not None}
     
+    def _ensure_env_loaded(self):
+        """
+        確保 .env 文件被載入（如果存在）
+        使用單例模式避免重複載入
+        """
+        if not self._env_loaded:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv()
+                self._env_loaded = True
+            except ImportError:
+                # 如果 python-dotenv 未安裝，靜默忽略
+                pass
+    
     def get_api_keys(self) -> List[str]:
         """
-        取得 API 金鑰列表，依照優先級合併來源
+        取得 API 金鑰列表
+        
+        載入順序：
+        1. 首先載入 .env 文件（如果存在）
+        2. 從環境變數讀取 GOOGLE_API_KEY
+        3. 從 TOML 配置讀取 api.google_api_keys
+        
+        優先級順序：TOML 配置 > 環境變數（包括 .env）
         
         Returns:
             List[str]: API 金鑰列表
         """
-        # 1. 從環境變數取得（包括 .env 文件）
+        # 確保 .env 文件被載入
+        self._ensure_env_loaded()
+        
+        # 1. 從環境變數取得
         env_keys = []
-        
-        # 嘗試載入 .env 文件
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-        except ImportError:
-            pass
-        
         env_keys_str = os.getenv('GOOGLE_API_KEY', '')
         if env_keys_str:
             env_keys = [key.strip() for key in env_keys_str.split(',') if key.strip()]
@@ -251,15 +268,18 @@ class ConfigManager:
         """
         取得 API 基礎 URL
         
+        載入順序：
+        1. 首先載入 .env 文件（如果存在）
+        2. 從環境變數讀取 BASE_URL
+        3. 從 TOML 配置讀取 advanced.base_url
+        
+        優先級順序：環境變數（包括 .env）> TOML 配置 > 預設值
+        
         Returns:
             str: API 基礎 URL
         """
-        # 嘗試載入 .env 文件
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-        except ImportError:
-            pass
+        # 確保 .env 文件被載入
+        self._ensure_env_loaded()
             
         # 1. 檢查環境變數（優先級高於 TOML）
         env_base_url = os.getenv('BASE_URL')
