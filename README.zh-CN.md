@@ -28,19 +28,29 @@
   * 注意：如果使用 gemini-balance，需要**关闭代码执行**。
 * ⚙️ **TOML 配置支持**：全面的配置管理系统，支持多种配置来源。
   * 📝 支持配置文件，在多个位置自动搜索
-  * 🔄 多源配置合并 (命令行 > TOML > 环境变量 > 默认值)
+  * 🔄 多源配置合并 (命令行 > 环境变量 > TOML > 默认值)
   * 🎛️ 在单个配置文件中轻松管理所有设置
 
 ## 🔧 安装
 
 ### 🛠️ 环境设定
 
-1. **安装 Python:** 建议使用 Python 3.8 或更高版本。
+1. **安装 Python:** 建议使用 Python 3.10 或更高版本。
 2. **安装 uv:** 如果您尚未安装 `uv`，请参阅 [uv 官方文件](https://github.com/astral-sh/uv) 进行安装。`uv` 是一个极快的 Python 包安装和管理器。
 
-### 📦 依赖
+### 📦 安装
 
-只需使用 `uv run` 即可自动安装和运行脚本：
+**选项 A：可编辑安装（推荐开发使用）**
+```bash
+pip install -e .
+```
+
+然后运行：
+```bash
+geminiasr -i video.mp4
+```
+
+**选项 B：使用 uv 一键运行**
 
 ```bash
 uv run gemini_asr.py -i video.mp4
@@ -85,8 +95,8 @@ uv run gemini_asr.py -i video.mp4
 
 GeminiASR 支持灵活的配置系统，优先级顺序如下:
 1. **命令行参数** (最高优先级)
-2. **TOML 配置文件**
-3. **环境变量**
+2. **环境变量**
+3. **TOML 配置文件**
 4. **默认值** (最低优先级)
 
 **配置文件搜索位置** (按顺序搜索):
@@ -94,6 +104,14 @@ GeminiASR 支持灵活的配置系统，优先级顺序如下:
 - `./.geminiasr/config.toml`
 - `~/.geminiasr/config.toml`
 - `~/.config/geminiasr/config.toml`
+
+**环境变量白名单**:
+- `GOOGLE_API_KEY` (逗号分隔)
+- `GEMINIASR_LANG`, `GEMINIASR_MODEL`, `GEMINIASR_DURATION`
+- `GEMINIASR_MAX_WORKERS`, `GEMINIASR_IGNORE_KEYS_LIMIT`, `GEMINIASR_DEBUG`
+- `GEMINIASR_SAVE_RAW`, `GEMINIASR_SKIP_EXISTING`, `GEMINIASR_PREVIEW`
+- `GEMINIASR_MAX_SEGMENT_RETRIES`, `GEMINIASR_EXTRA_PROMPT`
+- `GEMINIASR_BASE_URL` 或 `BASE_URL`
 
 **配置示例** (`config.toml`):
 ```toml
@@ -129,12 +147,14 @@ base_url = "https://generativelanguage.googleapis.com/"
 ### ⌨️ 命令行参数
 
 ```
-python gemini_asr.py [-h] -i INPUT [-d DURATION] [-l LANG] [-m MODEL]
-                      [--start START] [--end END] [--save-raw]
-                      [--skip-existing] [--debug]
-                      [--max-workers MAX_WORKERS]
-                      [--extra-prompt EXTRA_PROMPT]
-                      [--ignore-keys-limit]
+geminiasr [-h] -i INPUT [-d DURATION] [-l LANG] [-m MODEL]
+          [--start START] [--end END] [--save-raw]
+          [--skip-existing | --no-skip-existing]
+          [--debug] [--max-workers MAX_WORKERS]
+          [--extra-prompt EXTRA_PROMPT]
+          [--ignore-keys-limit] [--preview]
+          [--max-segment-retries MAX_SEGMENT_RETRIES]
+          [--config CONFIG]
 
 arguments:
   -h, --help            显示帮助訊息并退出
@@ -144,17 +164,22 @@ arguments:
                         每个片段的持续时间（秒）（默认值：900）
   -l LANG, --lang LANG  语言代码（默认值：zh-TW）
   -m MODEL, --model MODEL
-                        Gemini 模型（默认值：gemini-2.5-pro-exp-03-25）
+                        Gemini 模型（默认值：gemini-2.5-flash）
   --start START         开始时间（秒）
   --end END             结束时间（秒）
   --save-raw            保存原始转录结果
   --skip-existing       如果 SRT 字幕文件已存在则跳过处理
+  --no-skip-existing    覆盖已存在的 SRT 文件
   --debug               启用 DEBUG 级别日志记录
   --max-workers MAX_WORKERS
-                        最大工作线程数（默认值：不能超过 GOOGLE_API_KEY 的数量）
+                        最大工作线程数（默认值：基于 CPU 与 API Key）
   --extra-prompt EXTRA_PROMPT
                         额外的提示词或包含提示词的文件路径
   --ignore-keys-limit   忽略对最大工作线程数的 API Key 数量限制
+  --preview             显示原始转录结果预览
+  --max-segment-retries MAX_SEGMENT_RETRIES
+                        每个音频片段最大重试次数
+  --config CONFIG       配置文件路径
 ```
 
 ### 💡 使用示例
@@ -162,19 +187,19 @@ arguments:
 1. **使用 TOML 配置 (推荐):**
    ```bash
    # 所有设置从 config.toml 读取 - 只需指定输入文件
-   uv run gemini_asr.py -i video.mp4
+   geminiasr -i video.mp4
    
    # 使用 TOML 设置处理整个目录
-   uv run gemini_asr.py -i /path/to/media/folder
+   geminiasr -i /path/to/media/folder
    ```
 
 2. **传统命令行用法:**
    ```bash
    # 基本转录
-   uv run gemini_asr.py -i video.mp4
+   geminiasr -i video.mp4
    
    # 自定义设置
-   uv run gemini_asr.py -i video.mp4 -d 300 --debug
+   geminiasr -i video.mp4 -d 300 --debug
    ```
 
 ## 🔍 音频处理技术细节
@@ -186,6 +211,10 @@ arguments:
 * 📈 **输出 Token**: Gemini 2.5 Pro/Flash 每个请求的输出 token 限制为 65,536 个，这会影响可处理音频的最大持续时间。详情请参阅 [Gemini 模型文档](https://ai.google.dev/gemini-api/docs/models)。
 * 📊 **速率限制**: 默认模型 (`gemini-2.5-pro`) 在预览期间是免费的，但受特定限制：250,000 TPM (每分钟 token)，5 RPM (每分钟请求) 和 100 RPD (每日请求)。详情请参阅 [速率限制文档](https://ai.google.dev/gemini-api/docs/rate-limits)。
 * 💰 **定价**: 付费层每百万 token 费用为 $1.25 (≤200k token) 或 $2.50 (>200k token)。对于超过 2 小时的音频，建议分割文件以避免过多的 token 使用量和潜在的成本超支。有关完整的定价信息，请参阅 [Gemini 开发者 API 定价](https://ai.google.dev/gemini-api/docs/pricing)。
+
+## 📄 许可证
+
+MIT License。详见 `LICENSE`。
 
 ## 📝 注意事项
 

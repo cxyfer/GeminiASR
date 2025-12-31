@@ -2,6 +2,9 @@
 
 # 🎙️ Gemini ASR Transcription Tool
 
+![license](https://img.shields.io/badge/license-MIT-blue)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 **English** | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 *A Python tool that uses Google Gemini API to transcribe video or audio files into SRT subtitle files.*
@@ -27,19 +30,29 @@
   * Note: **code execution should be closed** if you use gemini-balance.
 * ⚙️ **TOML Configuration Support**: Comprehensive configuration management system with multiple sources.
   * 📝 Configuration file support with automatic search in multiple locations
-  * 🔄 Multi-source configuration merging (CLI > TOML > Environment > Defaults)
+  * 🔄 Multi-source configuration merging (CLI > Environment > TOML > Defaults)
   * 🎛️ Easy management of all settings in a single configuration file
 
 ## 🔧 Installation
 
 ### 🛠️ Environment Setup
 
-1. **Install Python:** Python 3.8 or higher is recommended.
+1. **Install Python:** Python 3.10 or higher is recommended.
 2. **Install uv:** If you haven't installed `uv` yet, please refer to the [uv official documentation](https://github.com/astral-sh/uv) for installation. `uv` is an extremely fast Python package installer and manager.
 
-### 📦 Dependencies
+### 📦 Install
 
-Simply use `uv run` to automatically install and run the script:
+**Option A: Editable install (recommended for development)**
+```bash
+pip install -e .
+```
+
+Then run:
+```bash
+geminiasr -i video.mp4
+```
+
+**Option B: One-shot run with uv**
 
 ```bash
 uv run gemini_asr.py -i video.mp4
@@ -84,8 +97,8 @@ This will automatically install all required dependencies and execute the script
 
 GeminiASR supports a flexible configuration system with the following priority order:
 1. **Command-line arguments** (highest priority)
-2. **TOML configuration file**
-3. **Environment variables**
+2. **Environment variables**
+3. **TOML configuration file**
 4. **Default values** (lowest priority)
 
 **Configuration File Locations** (searched in order):
@@ -93,6 +106,14 @@ GeminiASR supports a flexible configuration system with the following priority o
 - `./.geminiasr/config.toml`
 - `~/.geminiasr/config.toml`
 - `~/.config/geminiasr/config.toml`
+
+**Environment Variable Whitelist**:
+- `GOOGLE_API_KEY` (comma-separated keys)
+- `GEMINIASR_LANG`, `GEMINIASR_MODEL`, `GEMINIASR_DURATION`
+- `GEMINIASR_MAX_WORKERS`, `GEMINIASR_IGNORE_KEYS_LIMIT`, `GEMINIASR_DEBUG`
+- `GEMINIASR_SAVE_RAW`, `GEMINIASR_SKIP_EXISTING`, `GEMINIASR_PREVIEW`
+- `GEMINIASR_MAX_SEGMENT_RETRIES`, `GEMINIASR_EXTRA_PROMPT`
+- `GEMINIASR_BASE_URL` or `BASE_URL`
 
 **Example Configuration** (`config.toml`):
 ```toml
@@ -128,12 +149,14 @@ base_url = "https://generativelanguage.googleapis.com/"
 ### ⌨️ Command Line Arguments
 
 ```
-python gemini_asr.py [-h] -i INPUT [-d DURATION] [-l LANG] [-m MODEL]
-                      [--start START] [--end END] [--save-raw]
-                      [--skip-existing] [--debug]
-                      [--max-workers MAX_WORKERS]
-                      [--extra-prompt EXTRA_PROMPT]
-                      [--ignore-keys-limit]
+geminiasr [-h] -i INPUT [-d DURATION] [-l LANG] [-m MODEL]
+          [--start START] [--end END] [--save-raw]
+          [--skip-existing | --no-skip-existing]
+          [--debug] [--max-workers MAX_WORKERS]
+          [--extra-prompt EXTRA_PROMPT]
+          [--ignore-keys-limit] [--preview]
+          [--max-segment-retries MAX_SEGMENT_RETRIES]
+          [--config CONFIG]
 
 arguments:
   -h, --help            show this help message and exit
@@ -143,17 +166,22 @@ arguments:
                         Duration of each segment in seconds (default: 900)
   -l LANG, --lang LANG  Language code (default: zh-TW)
   -m MODEL, --model MODEL
-                        Gemini model (default: gemini-2.5-pro-exp-03-25)
+                        Gemini model (default: gemini-2.5-flash)
   --start START         Start time in seconds
   --end END             End time in seconds
   --save-raw            Save raw transcription results
   --skip-existing       Skip processing if SRT subtitle file already exists
+  --no-skip-existing    Overwrite existing SRT files
   --debug               Enable DEBUG level logging
   --max-workers MAX_WORKERS
-                        Maximum number of worker threads (default: cannot exceed the number of GOOGLE_API_KEYS)
+                        Maximum number of worker threads (default: based on CPU and API keys)
   --extra-prompt EXTRA_PROMPT
                         Additional prompt or path to a file containing prompts
   --ignore-keys-limit   Ignore the API key quantity limit on maximum worker threads
+  --preview             Print a preview of raw transcription content
+  --max-segment-retries MAX_SEGMENT_RETRIES
+                        Max retries per segment
+  --config CONFIG       Path to config.toml
 ```
 
 ### 💡 Usage Examples
@@ -161,19 +189,19 @@ arguments:
 1. **Using TOML Configuration (Recommended):**
    ```bash
    # All settings from config.toml - just specify input
-   uv run gemini_asr.py -i video.mp4
+   geminiasr -i video.mp4
    
    # Process entire directory with TOML settings
-   uv run gemini_asr.py -i /path/to/media/folder
+   geminiasr -i /path/to/media/folder
    ```
 
 2. **Traditional Command-Line Usage:**
    ```bash
    # Basic transcription
-   uv run gemini_asr.py -i video.mp4
+   geminiasr -i video.mp4
    
    # With custom settings
-   uv run gemini_asr.py -i video.mp4 -d 300 --debug
+   geminiasr -i video.mp4 -d 300 --debug
    ```
 
 ## 🔍 Technical Details About Audio Processing
@@ -185,6 +213,10 @@ arguments:
 * 📈 **Output Tokens**: Gemini 2.5 Pro/Flash has a limit of 65,536 output tokens per request, which affects the maximum duration of processable audio. See [Gemini Models Documentation](https://ai.google.dev/gemini-api/docs/models) for details.
 * 📊 **Rate Limits**: The default model (`gemini-2.5-pro`) is free during the preview period but subject to specific limits: 250,000 TPM (tokens per minute), 5 RPM (requests per minute) and 100 RPD (requests per day). See [Rate Limits Documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for details.
 * 💰 **Pricing**: Paid tier costs $1.25 per million tokens (≤200k tokens) or $2.50 per million tokens (>200k tokens). For audio longer than 2 hours, it is recommended to split the file to avoid excessive token usage and potential cost overruns. See [Gemini Developer API Pricing](https://ai.google.dev/gemini-api/docs/pricing) for complete pricing information.
+
+## 📄 License
+
+MIT License. See `LICENSE`.
 
 ## 📝 Notes
 
