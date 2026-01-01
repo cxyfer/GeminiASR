@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - None
 
+## [1.2.1] - 2026-01-01
+
+### Fixed
+- Fixed hanging during transcription by implementing a default 600s API timeout.
+- Fixed redundant internal retry loops in transcription logic; retries are now handled by the main scheduler.
+- Fixed `'VideoFileClip' object has no attribute 'subclip'` error by migrating to MoviePy v2 (`subclipped`).
+- Fixed deprecated `verbose` argument usage in `write_audiofile`.
+
+### Changed
+- Upgraded `moviepy` dependency to `>=2.0.0` (tested with v2.2.1).
+- Added `timeout` configuration option to `[processing]` section (default: 600 seconds).
+
 ## [1.2.0] - 2026-01-01
 
 ### Added
