@@ -214,6 +214,38 @@ arguments:
 * 📊 **Rate Limits**: The default model (`gemini-2.5-pro`) is free during the preview period but subject to specific limits: 250,000 TPM (tokens per minute), 5 RPM (requests per minute) and 100 RPD (requests per day). See [Rate Limits Documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for details.
 * 💰 **Pricing**: Paid tier costs $1.25 per million tokens (≤200k tokens) or $2.50 per million tokens (>200k tokens). For audio longer than 2 hours, it is recommended to split the file to avoid excessive token usage and potential cost overruns. See [Gemini Developer API Pricing](https://ai.google.dev/gemini-api/docs/pricing) for complete pricing information.
 
+## 🤝 Contributing
+
+Thanks for your interest in GeminiASR! This guide keeps contributions simple and consistent.
+
+### Quick Start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### Development Notes
+
+- Target Python: 3.10+
+- Configuration: use `config.example.toml` as a template
+- Avoid committing secrets: use `.env` or untracked `config.toml`
+
+### Lint & Test
+
+```bash
+ruff check .
+pytest
+```
+
+### Pull Request Checklist
+
+- [ ] Code is formatted and linted
+- [ ] Tests added or updated when applicable
+- [ ] README or docs updated if behavior changes
+- [ ] No secrets or credentials included
+
 ## 📄 License
 
 MIT License. See `LICENSE`.

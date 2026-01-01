@@ -211,6 +211,41 @@ arguments:
 * 📊 **速率限制**: 預設模型 (`gemini-2.5-pro`) 在預覽期間是免費的，但受特定限制：250,000 TPM (每分鐘 token)，5 RPM (每分鐘請求) 和 100 RPD (每天請求)。有關詳細資訊，請參閱 [速率限制文件](https://ai.google.dev/gemini-api/docs/rate-limits)。
 * 💰 **定價**: 付費層每百萬 token 費用為 $1.25 (≤200k token) 或 $2.50 (>200k token)。對於超過 2 小時的音訊，建議分割檔案以避免過多的 token 使用量和潛在的成本超支。有關完整的定價資訊，請參閱 [Gemini 開發者 API 定價](https://ai.google.dev/gemini-api/docs/pricing)。
 
+## 🤝 貢獻指南
+
+感謝對 GeminiASR 的興趣！此指南讓貢獻流程更簡單一致。
+
+### 快速開始
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+### 開發備註
+
+- 目標 Python：3.10+
+- 設定：以 `config.example.toml` 為模板
+- 避免提交機密：使用 `.env` 或未追蹤的 `config.toml`
+
+### Lint 與測試
+
+```bash
+ruff check .
+pytest
+```
+
+### PR 檢查清單
+
+- [ ] 代碼已格式化並通過 lint
+- [ ] 視需要新增或更新測試
+- [ ] 若行為變更，已更新 README 或文件
+- [ ] 未包含機密或憑證
+
+#### Removed
+- 舊版 `utils/` 模組
+
 ## 📄 授權
 
 MIT License。詳見 `LICENSE`。
