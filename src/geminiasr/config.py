@@ -3,6 +3,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
+DEFAULT_OPENAI_COMPAT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+ALLOWED_API_SOURCES = {"gemini", "openai"}
+
 from dotenv import load_dotenv
 
 try:
@@ -36,8 +40,9 @@ class LoggingConfig:
 
 @dataclass
 class ApiConfig:
+    source: str = "gemini"
     google_api_keys: list[str] = field(default_factory=list)
-    base_url: str = "https://generativelanguage.googleapis.com/"
+    base_url: str = DEFAULT_GEMINI_BASE_URL
 
 
 @dataclass
@@ -57,6 +62,12 @@ class Config:
             raise ValueError("timeout must be positive")
         if self.transcription.max_segment_retries < 0:
             raise ValueError("max_segment_retries must be >= 0")
+        source = (self.api.source or "").strip().lower()
+        if source not in ALLOWED_API_SOURCES:
+            raise ValueError(f"api.source must be one of {sorted(ALLOWED_API_SOURCES)}")
+        self.api.source = source
+        if source == "openai" and self.api.base_url == DEFAULT_GEMINI_BASE_URL:
+            self.api.base_url = DEFAULT_OPENAI_COMPAT_BASE_URL
 
 
 def _parse_bool(value: str) -> bool | None:
@@ -79,6 +90,15 @@ def _parse_int(value: str) -> int | None:
         return None
 
 
+def _parse_api_source(value: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in ALLOWED_API_SOURCES:
+        return normalized
+    return None
+
+
 class ConfigManager:
     CONFIG_SEARCH_PATHS = [
         Path("./config.toml"),
@@ -88,6 +108,7 @@ class ConfigManager:
     ]
 
     ENV_MAPPINGS: dict[str, tuple[str, str, Callable[[str], object]]] = {
+        "GEMINIASR_API_SOURCE": ("api", "source", _parse_api_source),
         "GEMINIASR_LANG": ("transcription", "lang", str),
         "GEMINIASR_MODEL": ("transcription", "model", str),
         "GEMINIASR_DURATION": ("transcription", "duration", _parse_int),
@@ -175,6 +196,7 @@ class ConfigManager:
         config.logging.debug = logging_config.get("debug", config.logging.debug)
 
         api_config = toml_config.get("api", {})
+        config.api.source = api_config.get("source", config.api.source)
         config.api.google_api_keys = api_config.get(
             "google_api_keys", config.api.google_api_keys
         )
@@ -219,6 +241,7 @@ class ConfigManager:
         logger.debug("忽略金鑰限制: %s", config.processing.ignore_keys_limit)
         logger.debug("分段最大重試次數: %s", config.transcription.max_segment_retries)
         logger.debug("API 基礎 URL: %s", config.api.base_url)
+        logger.debug("API 來源: %s", config.api.source)
         logger.debug("載入的 API 金鑰數量: %s", len(config.api.google_api_keys))
         logger.debug("最大工作執行緒數: %s", config.processing.max_workers)
         logger.debug("API 逾時設定: %s 秒", config.processing.timeout)

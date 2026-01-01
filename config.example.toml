@@ -27,11 +27,14 @@ debug = false
 
 # API 設定
 [api]
+source = "gemini"  #  "gemini" or "openai"
 # Google API Keys，多個 API KEY 用逗號分隔
 # 例如: google_api_keys = ["key1", "key2", "key3"]
 google_api_keys = []
 
 # 進階設定
 [advanced]
-# extra_prompt = null  # 留空表示不使用額外提示詞
-base_url = "https://generativelanguage.googleapis.com/"
+# extra_prompt = null  # Could be filepath or string. Leave empty to disable extra prompt
+base_url = "https://generativelanguage.googleapis.com/"  # Gemini offical endpoint
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"  # Gemini offical endpoint (Openai compatible)
+# base_url = "https://api.xxxx.com/v1/"  # New-API endpoint

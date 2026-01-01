@@ -78,6 +78,7 @@ This will automatically install all required dependencies and execute the script
    In `config.toml`:
    ```toml
    [api]
+   source = "gemini"  # "gemini" or "openai"
    google_api_keys = ["YOUR_API_KEY_1", "YOUR_API_KEY_2", "YOUR_API_KEY_3"]
    ```
 
@@ -113,7 +114,12 @@ GeminiASR supports a flexible configuration system with the following priority o
 - `GEMINIASR_MAX_WORKERS`, `GEMINIASR_IGNORE_KEYS_LIMIT`, `GEMINIASR_DEBUG`
 - `GEMINIASR_SAVE_RAW`, `GEMINIASR_SKIP_EXISTING`, `GEMINIASR_PREVIEW`
 - `GEMINIASR_MAX_SEGMENT_RETRIES`, `GEMINIASR_EXTRA_PROMPT`
+- `GEMINIASR_API_SOURCE`
 - `GEMINIASR_BASE_URL` or `BASE_URL`
+
+**OpenAI-Compatible Endpoint**:
+- Set `api.source = "openai"` (or `GEMINIASR_API_SOURCE=openai`).
+- If `advanced.base_url` stays at the Gemini default, it will switch to `https://generativelanguage.googleapis.com/v1beta/openai/`.
 
 **Example Configuration** (`config.toml`):
 ```toml
@@ -136,12 +142,14 @@ debug = true            # Enable debug logging
 
 # API Settings
 [api]
+source = "gemini"  # "gemini" or "openai"
 google_api_keys = ["key1", "key2", "key3"]
 
 # Advanced Settings
 [advanced]
 extra_prompt = "prompt.md"  # Path to prompt file
 base_url = "https://generativelanguage.googleapis.com/"
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
 ## 📋 Usage
