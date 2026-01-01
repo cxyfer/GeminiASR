@@ -26,6 +26,7 @@ class TranscriptionConfig:
 class ProcessingConfig:
     max_workers: int | None = None
     ignore_keys_limit: bool = False
+    timeout: int = 600
 
 
 @dataclass
@@ -52,6 +53,8 @@ class Config:
             raise ValueError("duration must be positive")
         if self.processing.max_workers is not None and self.processing.max_workers <= 0:
             raise ValueError("max_workers must be positive or None")
+        if self.processing.timeout <= 0:
+            raise ValueError("timeout must be positive")
         if self.transcription.max_segment_retries < 0:
             raise ValueError("max_segment_retries must be >= 0")
 
@@ -98,6 +101,7 @@ class ConfigManager:
         ),
         "GEMINIASR_MAX_WORKERS": ("processing", "max_workers", _parse_int),
         "GEMINIASR_IGNORE_KEYS_LIMIT": ("processing", "ignore_keys_limit", _parse_bool),
+        "GEMINIASR_TIMEOUT": ("processing", "timeout", _parse_int),
         "GEMINIASR_DEBUG": ("logging", "debug", _parse_bool),
         "GEMINIASR_EXTRA_PROMPT": ("extra_prompt", "", str),
         "BASE_URL": ("api", "base_url", str),
@@ -163,6 +167,9 @@ class ConfigManager:
         config.processing.ignore_keys_limit = processing.get(
             "ignore_keys_limit", config.processing.ignore_keys_limit
         )
+        config.processing.timeout = processing.get(
+            "timeout", config.processing.timeout
+        )
 
         logging_config = toml_config.get("logging", {})
         config.logging.debug = logging_config.get("debug", config.logging.debug)
@@ -214,5 +221,6 @@ class ConfigManager:
         logger.debug("API 基礎 URL: %s", config.api.base_url)
         logger.debug("載入的 API 金鑰數量: %s", len(config.api.google_api_keys))
         logger.debug("最大工作執行緒數: %s", config.processing.max_workers)
+        logger.debug("API 逾時設定: %s 秒", config.processing.timeout)
         logger.debug("額外提示詞: %s", config.extra_prompt)
         logger.debug("========================")

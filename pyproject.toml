@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "google-genai>=1.56.0",
-    "moviepy==1.0.3",
+    "moviepy>=2.0.0",
     "python-dotenv>=1.1.0",
     "tomli>=1.2.0",
 ]

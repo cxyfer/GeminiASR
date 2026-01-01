@@ -37,7 +37,8 @@ def process_single_file(
     extra_prompt: str | None = None,
     time_offset: int = 0,
     preview: bool = False,
-    max_retries: int = 3,
+    max_retries: int = 3,  # Keep signature compatible, though unused internally
+    timeout: int = 600,
 ) -> tuple[str | None, str | None]:
     basename = os.path.basename(file_path)
     logger.info("正在轉錄 %s (索引 %s)...", basename, idx)
@@ -54,95 +55,81 @@ def process_single_file(
         max_output_tokens=None,
     )
 
-    retries = 0
-    last_error = None
-
-    while retries <= max_retries:
-        current_key = None
+    current_key = None
+    try:
         try:
-            try:
-                current_key = key_manager.get_key()
-                logger.debug("使用隨機選取的 API KEY (後6位: ...%s)", current_key[-6:])
-                client = genai.Client(
-                    api_key=current_key,
-                    http_options=types.HttpOptions(base_url=base_url),
-                )
-            except ValueError as exc:
-                logger.error("無法獲取可用的 API KEY: %s", exc)
-                return None, None
-
-            try:
-                logger.debug("正在上傳音訊檔案 %s", file_path)
-                with open(file_path, "rb") as handle:
-                    file_bytes = handle.read()
-                mime_type, _ = mimetypes.guess_type(file_path)
-                if mime_type is None:
-                    raise ValueError("Failed to guess the mime type of the file.")
-                uploaded_file = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
-                logger.debug("已成功上傳檔案 %s", file_path)
-            except Exception as exc:
-                logger.error("上傳音訊檔案失敗: %s", exc)
-                return None, None
-
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[prompt, uploaded_file],
-                config=generation_config,
+            current_key = key_manager.get_key()
+            logger.debug("使用隨機選取的 API KEY (後6位: ...%s)", current_key[-6:])
+            client = genai.Client(
+                api_key=current_key,
+                http_options=types.HttpOptions(
+                    base_url=base_url, timeout=timeout * 1000
+                ),
             )
+        except ValueError as exc:
+            logger.error("無法獲取可用的 API KEY: %s", exc)
+            raise
 
-            raw_transcript = response.text
-            logger.debug("已收到 Gemini API 回應，回應長度: %s 字元", len(raw_transcript))
-
-            if preview:
-                if len(raw_transcript) > 400:
-                    preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
-                else:
-                    preview_text = raw_transcript
-                logger.info("原始轉錄結果預覽:\n%s", preview_text)
-
-            raw_file = None
-            if save_raw:
-                raw_file = save_raw_transcript(raw_transcript, raw_dir, basename)
-                logger.info("原始轉錄結果已保存至: %s", raw_file)
-
-            logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
-            srt_content = direct_to_srt(raw_transcript, time_offset)
-            if not srt_content:
-                logger.error("轉錄 %s 失敗", file_path)
-                return None, raw_file
-
-            subtitle_count = srt_content.count("\n\n") if srt_content else 0
-            logger.debug("已將轉錄結果轉換為 SRT，估計字幕數量: %s", subtitle_count)
-
-            time2 = time.time()
-            logger.info("已完成 %s 的轉錄，耗時 %.2f 秒", basename, time2 - time1)
-            return srt_content, raw_file
-
+        try:
+            logger.debug("正在上傳音訊檔案 %s", file_path)
+            with open(file_path, "rb") as handle:
+                file_bytes = handle.read()
+            mime_type, _ = mimetypes.guess_type(file_path)
+            if mime_type is None:
+                raise ValueError("Failed to guess the mime type of the file.")
+            uploaded_file = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+            logger.debug("已成功上傳檔案 %s", file_path)
         except Exception as exc:
-            logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
-            last_error = exc
-            error_message = str(exc)
+            logger.error("上傳音訊檔案失敗: %s", exc)
+            raise
 
-            if current_key and ("429" in error_message or "403" in error_message):
-                if "429" in error_message:
-                    logger.warning("API KEY 限流錯誤 (429): %s", error_message)
-                    if key_manager.disable_key(current_key, reason="rate_limit"):
-                        retries -= 1
-                elif "403" in error_message:
-                    logger.error("API KEY 被禁用 (403): %s", error_message)
-                    if key_manager.disable_key(current_key, reason="banned"):
-                        retries -= 1
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[prompt, uploaded_file],
+            config=generation_config,
+        )
 
-            retries += 1
-            if retries <= max_retries:
-                backoff_time = 2 ** retries
-                logger.warning("第 %s 次重試，等待 %s 秒...", retries, backoff_time)
-                time.sleep(backoff_time)
+        raw_transcript = response.text
+        logger.debug("已收到 Gemini API 回應，回應長度: %s 字元", len(raw_transcript))
+
+        if preview:
+            if len(raw_transcript) > 400:
+                preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
             else:
-                logger.error("處理 %s 時發生錯誤，已重試 %s 次: %s", file_path, max_retries, last_error)
+                preview_text = raw_transcript
+            logger.info("原始轉錄結果預覽:\n%s", preview_text)
 
-    logger.error("處理 %s 時發生錯誤: %s", file_path, last_error, exc_info=True)
-    return None, None
+        raw_file = None
+        if save_raw:
+            raw_file = save_raw_transcript(raw_transcript, raw_dir, basename)
+            logger.info("原始轉錄結果已保存至: %s", raw_file)
+
+        logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
+        srt_content = direct_to_srt(raw_transcript, time_offset)
+        if not srt_content:
+            logger.error("轉錄 %s 失敗", file_path)
+            raise ValueError("Empty transcript result")
+
+        subtitle_count = srt_content.count("\n\n") if srt_content else 0
+        logger.debug("已將轉錄結果轉換為 SRT，估計字幕數量: %s", subtitle_count)
+
+        time2 = time.time()
+        logger.info("已完成 %s 的轉錄，耗時 %.2f 秒", basename, time2 - time1)
+        return srt_content, raw_file
+
+    except Exception as exc:
+        logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
+        error_message = str(exc)
+
+        if current_key and ("429" in error_message or "403" in error_message):
+            if "429" in error_message:
+                logger.warning("API KEY 限流錯誤 (429): %s", error_message)
+                key_manager.disable_key(current_key, reason="rate_limit")
+            elif "403" in error_message:
+                logger.error("API KEY 被禁用 (403): %s", error_message)
+                key_manager.disable_key(current_key, reason="banned")
+        
+        raise
 
 
 def transcribe_with_gemini(
@@ -237,6 +224,8 @@ def transcribe_with_gemini(
                     extra_prompt,
                     task.segment_time_offset,
                     preview,
+                    config.transcription.max_segment_retries,
+                    config.processing.timeout,
                 )
                 active_futures[future] = task
 

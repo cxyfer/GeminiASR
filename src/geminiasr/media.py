@@ -3,7 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 
-import moviepy.editor as mp
+from moviepy import AudioFileClip, VideoFileClip
 
 from .config import Config
 from .constants import AUDIO_FILE_EXTENSIONS, VIDEO_FILE_EXTENSIONS
@@ -17,7 +17,7 @@ def split_media(media_path: str, temp_dir: str, duration: int = 300) -> None:
     file_type = "影片" if is_video else "音訊"
     logger.debug("開始分割%s %s，分段時長: %s 秒", file_type, media_path, duration)
 
-    media = mp.VideoFileClip(media_path) if is_video else mp.AudioFileClip(media_path)
+    media = VideoFileClip(media_path) if is_video else AudioFileClip(media_path)
     total_duration = int(media.duration)
     parts = total_duration // duration if total_duration % duration == 0 else total_duration // duration + 1
     logger.debug("%s總時長: %s 秒，將分為 %s 個部分", file_type, total_duration, parts)
@@ -25,11 +25,11 @@ def split_media(media_path: str, temp_dir: str, duration: int = 300) -> None:
     for idx in range(1, parts + 1):
         chunk_filename = os.path.join(temp_dir, f"chunk_{idx:02d}.mp3")
         logger.debug("處理第 %s/%s 部分 → %s", idx, parts, chunk_filename)
-        clip = media.subclip((idx - 1) * duration, min(idx * duration, total_duration))
+        clip = media.subclipped((idx - 1) * duration, min(idx * duration, total_duration))
         if is_video:
-            clip.audio.write_audiofile(chunk_filename, verbose=False, logger=None)
+            clip.audio.write_audiofile(chunk_filename, logger=None)
         else:
-            clip.write_audiofile(chunk_filename, verbose=False, logger=None)
+            clip.write_audiofile(chunk_filename, logger=None)
 
     logger.info("已將%s分割成 %s 個部分", file_type, parts)
     media.close()
@@ -39,7 +39,7 @@ def clip_media(filepath: str, start: int | None = None, end: int | None = None) 
     logger.info("準備剪輯影片: %s", filepath)
     logger.debug("剪輯範圍: 開始=%s, 結束=%s", start if start is not None else "開頭", end or "結尾")
 
-    clip = mp.VideoFileClip(filepath)
+    clip = VideoFileClip(filepath)
     ext = os.path.splitext(filepath)[1]
     logger.debug("原始影片時長: %.2f 秒", clip.duration)
 
@@ -49,14 +49,14 @@ def clip_media(filepath: str, start: int | None = None, end: int | None = None) 
         if end is None:
             end = int(clip.duration)
         logger.info("剪輯影片，範圍: %s-%s 秒", start, end)
-        clip = clip.subclip(start, end)
+        clip = clip.subclipped(start, end)
         newpath = filepath.replace(ext, f"_{start}-{end}.mp3")
     else:
         logger.info("提取完整影片的音訊")
         newpath = filepath.replace(ext, ".mp3")
 
     logger.debug("開始提取音訊到: %s", newpath)
-    clip.audio.write_audiofile(newpath, verbose=False, logger=None)
+    clip.audio.write_audiofile(newpath, logger=None)
     logger.info("音訊提取完成: %s", newpath)
     clip.close()
     return newpath
