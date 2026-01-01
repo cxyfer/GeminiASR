@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "google-genai>=1.13.0",
+    "google-genai>=1.56.0",
     "moviepy==1.0.3",
     "python-dotenv>=1.1.0",
     "tomli>=1.2.0",
@@ -30,7 +30,6 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/cxyfer/GeminiASR"
 Issues = "https://github.com/cxyfer/GeminiASR/issues"
-Changelog = "https://github.com/cxyfer/GeminiASR/blob/main/CHANGELOG.md"
 
 [project.scripts]
 geminiasr = "geminiasr.cli:main"
