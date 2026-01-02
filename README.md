@@ -217,6 +217,9 @@ arguments:
 > [!NOTE]
 > The old default model (`gemini-2.5-pro`) is free but has some limits. Now the default model is `gemini-2.5-flash`.
 
+> [!IMPORTANT]
+> Although `gemini-3-pro-preview` and `gemini-3-flash-preview` have been released, under the current prompt template, their timestamp accuracy is far inferior to `gemini-2.5-pro` and even `gemini-2.5-flash`. Therefore, considering all factors, we still recommend using the `gemini-2.5-flash` model.
+
 * 🧮 **Token Usage**: Gemini uses 32 tokens per second of audio (1,920 tokens/minute). For more details on audio processing capabilities, see [Gemini Audio Documentation](https://ai.google.dev/gemini-api/docs/audio).
 * 📈 **Output Tokens**: Gemini 2.5 Pro/Flash has a limit of 65,536 output tokens per request, which affects the maximum duration of processable audio. See [Gemini Models Documentation](https://ai.google.dev/gemini-api/docs/models) for details.
 * 📊 **Rate Limits**: The default model (`gemini-2.5-pro`) is free during the preview period but subject to specific limits: 250,000 TPM (tokens per minute), 5 RPM (requests per minute) and 100 RPD (requests per day). See [Rate Limits Documentation](https://ai.google.dev/gemini-api/docs/rate-limits) for details.
