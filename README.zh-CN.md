@@ -76,6 +76,7 @@ uv run gemini_asr.py -i video.mp4
    在 `config.toml` 中:
    ```toml
    [api]
+   source = "gemini"  # "gemini" 或 "openai"
    google_api_keys = ["YOUR_API_KEY_1", "YOUR_API_KEY_2", "YOUR_API_KEY_3"]
    ```
 
@@ -111,7 +112,12 @@ GeminiASR 支持灵活的配置系统，优先级顺序如下:
 - `GEMINIASR_MAX_WORKERS`, `GEMINIASR_IGNORE_KEYS_LIMIT`, `GEMINIASR_DEBUG`
 - `GEMINIASR_SAVE_RAW`, `GEMINIASR_SKIP_EXISTING`, `GEMINIASR_PREVIEW`
 - `GEMINIASR_MAX_SEGMENT_RETRIES`, `GEMINIASR_EXTRA_PROMPT`
+- `GEMINIASR_API_SOURCE`
 - `GEMINIASR_BASE_URL` 或 `BASE_URL`
+
+**OpenAI 兼容端点**:
+- 设置 `api.source = "openai"`（或 `GEMINIASR_API_SOURCE=openai`）。
+- 若 `advanced.base_url` 保持 Gemini 默认值，会自动切换为 `https://generativelanguage.googleapis.com/v1beta/openai/`。
 
 **配置示例** (`config.toml`):
 ```toml
@@ -134,12 +140,14 @@ debug = true            # 启用调试日志
 
 # API 设置
 [api]
+source = "gemini"  # "gemini" 或 "openai"
 google_api_keys = ["key1", "key2", "key3"]
 
 # 高级设置
 [advanced]
 extra_prompt = "prompt.md"  # 提示词文件路径
 base_url = "https://generativelanguage.googleapis.com/"
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
 ## 📋 使用方法
@@ -206,6 +214,9 @@ arguments:
 
 > [!NOTE]
 > 旧的默认模型 (`gemini-2.5-pro`) 是免费的但有一些限制。现在默认模型是 `gemini-2.5-flash`。
+
+> [!IMPORTANT]
+> 虽然 `gemini-3-pro-preview` 以及 `gemini-3-flash-preview` 已经推出，但在目前使用的 prompt template 下，对时间戳的判断远不如 `gemini-2.5-pro` 甚至是 `gemini-2.5-flash`，因此综合考量还是推荐使用 `gemini-2.5-flash` 模型。
 
 * 🧮 **Token 使用量**: Gemini 每秒音频使用 32 个 token (1,920 tokens/分钟)。有关音频处理能力的更多详细信息，请参阅 [Gemini 音频文档](https://ai.google.dev/gemini-api/docs/audio)。
 * 📈 **输出 Token**: Gemini 2.5 Pro/Flash 每个请求的输出 token 限制为 65,536 个，这会影响可处理音频的最大持续时间。详情请参阅 [Gemini 模型文档](https://ai.google.dev/gemini-api/docs/models)。

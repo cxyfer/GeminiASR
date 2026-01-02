@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -17,22 +18,27 @@ def split_media(media_path: str, temp_dir: str, duration: int = 300) -> None:
     file_type = "影片" if is_video else "音訊"
     logger.debug("開始分割%s %s，分段時長: %s 秒", file_type, media_path, duration)
 
-    media = VideoFileClip(media_path) if is_video else AudioFileClip(media_path)
-    total_duration = int(media.duration)
-    parts = total_duration // duration if total_duration % duration == 0 else total_duration // duration + 1
-    logger.debug("%s總時長: %s 秒，將分為 %s 個部分", file_type, total_duration, parts)
+    # 強制使用 AudioFileClip 以實現樣本級精確切割，避免視頻關鍵幀對齊問題
+    media = AudioFileClip(media_path)
+    try:
+        total_duration = media.duration
+        parts = math.ceil(total_duration / duration)
+        logger.debug("%s總時長: %.2f 秒，將分為 %s 個部分", file_type, total_duration, parts)
 
-    for idx in range(1, parts + 1):
-        chunk_filename = os.path.join(temp_dir, f"chunk_{idx:02d}.mp3")
-        logger.debug("處理第 %s/%s 部分 → %s", idx, parts, chunk_filename)
-        clip = media.subclipped((idx - 1) * duration, min(idx * duration, total_duration))
-        if is_video:
-            clip.audio.write_audiofile(chunk_filename, logger=None)
-        else:
+        for idx in range(1, parts + 1):
+            chunk_filename = os.path.join(temp_dir, f"chunk_{idx:02d}.mp3")
+            start_time = (idx - 1) * duration
+            end_time = min(idx * duration, total_duration)
+            logger.debug("處理第 %s/%s 部分 → %s (%.2f-%.2f 秒)", idx, parts, chunk_filename, start_time, end_time)
+
+            clip = media.subclipped(start_time, end_time)
+            actual_duration = clip.duration
+            logger.debug("Chunk %s 實際時長: %.2f 秒 (預期: %.2f 秒)", idx, actual_duration, end_time - start_time)
             clip.write_audiofile(chunk_filename, logger=None)
 
-    logger.info("已將%s分割成 %s 個部分", file_type, parts)
-    media.close()
+        logger.info("已將%s分割成 %s 個部分", file_type, parts)
+    finally:
+        media.close()
 
 
 def clip_media(filepath: str, start: int | None = None, end: int | None = None) -> str:

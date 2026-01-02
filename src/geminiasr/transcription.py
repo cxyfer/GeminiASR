@@ -1,15 +1,19 @@
+import base64
 import collections
+import json
 import logging
 import mimetypes
 import os
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from google import genai
 from google.genai import types
 
 from .api_keys import key_manager
-from .config import Config
+from .config import DEFAULT_GEMINI_BASE_URL, DEFAULT_OPENAI_COMPAT_BASE_URL, Config
 from .prompt import get_transcription_prompt
 from .srt import combine_subtitles, direct_to_srt
 
@@ -23,6 +27,167 @@ def save_raw_transcript(transcript_text: str, output_path: str, chunk_name: str)
         handle.write(transcript_text)
     logger.debug("已保存原始轉錄結果到: %s", output_file)
     return output_file
+
+
+def _resolve_audio_format(file_path: str, mime_type: str | None) -> str:
+    if mime_type == "audio/mpeg":
+        return "mp3"
+    if mime_type == "audio/wav":
+        return "wav"
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    return ext or "mp3"
+
+
+def _post_openai_chat_completion(
+    base_url: str, api_key: str, payload: dict, timeout: int
+) -> dict:
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(url, data=body, method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Authorization", f"Bearer {api_key}")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"OpenAI 相容端點回應錯誤 ({exc.code}): {error_body}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenAI 相容端點連線失敗: {exc}") from exc
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("OpenAI 相容端點回傳非 JSON 格式") from exc
+
+
+def _get_chunk_duration(file_path: str, default_duration: int) -> int:
+    try:
+        from moviepy import AudioFileClip
+        audio_clip = AudioFileClip(file_path)
+        try:
+            actual = int(audio_clip.duration)
+        finally:
+            audio_clip.close()
+        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual, default_duration)
+        return actual
+    except Exception as exc:
+        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
+        return default_duration
+
+
+def _handle_api_key_error(current_key: str | None, error_message: str) -> None:
+    if not current_key:
+        return
+    if "429" in error_message:
+        logger.warning("API KEY 限流錯誤 (429): %s", error_message)
+        key_manager.disable_key(current_key, reason="rate_limit")
+    elif "403" in error_message:
+        logger.error("API KEY 被禁用 (403): %s", error_message)
+        key_manager.disable_key(current_key, reason="banned")
+
+
+def process_single_file_openai(
+    file_path: str,
+    idx: int,
+    duration: int,
+    lang: str,
+    model_name: str,
+    save_raw: bool,
+    raw_dir: str,
+    base_url: str,
+    extra_prompt: str | None = None,
+    time_offset: int = 0,
+    preview: bool = False,
+    max_retries: int = 3,  # Keep signature compatible, though unused internally
+    timeout: int = 600,
+) -> tuple[str | None, str | None]:
+    basename = os.path.basename(file_path)
+    logger.info("正在轉錄 %s (索引 %s)...", basename, idx)
+    logger.debug("應用時間偏移量: %s 秒", time_offset)
+    time1 = time.time()
+
+    actual_chunk_duration = _get_chunk_duration(file_path, duration)
+
+    prompt = get_transcription_prompt(lang, extra_prompt)
+    logger.debug("已生成提示詞模板，語言設定: %s", lang)
+
+    current_key = None
+    try:
+        try:
+            current_key = key_manager.get_key()
+            logger.debug("使用隨機選取的 API KEY (後6位: ...%s)", current_key[-6:])
+        except ValueError as exc:
+            logger.error("無法獲取可用的 API KEY: %s", exc)
+            raise
+
+        try:
+            logger.debug("正在讀取音訊檔案 %s", file_path)
+            with open(file_path, "rb") as handle:
+                file_bytes = handle.read()
+            mime_type, _ = mimetypes.guess_type(file_path)
+            audio_format = _resolve_audio_format(file_path, mime_type)
+            logger.debug("音訊格式解析為: %s", audio_format)
+        except Exception as exc:
+            logger.error("讀取音訊檔案失敗: %s", exc)
+            raise
+
+        audio_b64 = base64.b64encode(file_bytes).decode("ascii")
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "input_audio",
+                            "input_audio": {"data": audio_b64, "format": audio_format},
+                        },
+                    ],
+                }
+            ],
+        }
+
+        response = _post_openai_chat_completion(base_url, current_key, payload, timeout)
+        choices = response.get("choices", [])
+        message = choices[0].get("message", {}) if choices else {}
+        raw_transcript = message.get("content") if message else None
+        if not raw_transcript:
+            raise ValueError("Empty transcript result")
+        logger.debug("已收到 OpenAI 相容端點回應，回應長度: %s 字元", len(raw_transcript))
+
+        if preview:
+            if len(raw_transcript) > 400:
+                preview_text = f"{raw_transcript[:200]}...\n...\n{raw_transcript[-200:]}"
+            else:
+                preview_text = raw_transcript
+            logger.info("原始轉錄結果預覽:\n%s", preview_text)
+
+        raw_file = None
+        if save_raw:
+            raw_file = save_raw_transcript(raw_transcript, raw_dir, basename)
+            logger.info("原始轉錄結果已保存至: %s", raw_file)
+
+        logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
+        srt_content = direct_to_srt(raw_transcript, time_offset, chunk_duration=actual_chunk_duration)
+        if not srt_content:
+            logger.error("轉錄 %s 失敗", file_path)
+            raise ValueError("Empty transcript result")
+
+        subtitle_count = srt_content.count("\n\n") if srt_content else 0
+        logger.debug("已將轉錄結果轉換為 SRT，估計字幕數量: %s", subtitle_count)
+
+        time2 = time.time()
+        logger.info("已完成 %s 的轉錄，耗時 %.2f 秒", basename, time2 - time1)
+        return srt_content, raw_file
+
+    except Exception as exc:
+        logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
+        error_message = str(exc)
+        _handle_api_key_error(current_key, error_message)
+        raise
 
 
 def process_single_file(
@@ -44,6 +209,8 @@ def process_single_file(
     logger.info("正在轉錄 %s (索引 %s)...", basename, idx)
     logger.debug("應用時間偏移量: %s 秒", time_offset)
     time1 = time.time()
+
+    actual_chunk_duration = _get_chunk_duration(file_path, duration)
 
     prompt = get_transcription_prompt(lang, extra_prompt)
     logger.debug("已生成提示詞模板，語言設定: %s", lang)
@@ -105,7 +272,7 @@ def process_single_file(
             logger.info("原始轉錄結果已保存至: %s", raw_file)
 
         logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
-        srt_content = direct_to_srt(raw_transcript, time_offset)
+        srt_content = direct_to_srt(raw_transcript, time_offset, chunk_duration=actual_chunk_duration)
         if not srt_content:
             logger.error("轉錄 %s 失敗", file_path)
             raise ValueError("Empty transcript result")
@@ -120,15 +287,7 @@ def process_single_file(
     except Exception as exc:
         logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
         error_message = str(exc)
-
-        if current_key and ("429" in error_message or "403" in error_message):
-            if "429" in error_message:
-                logger.warning("API KEY 限流錯誤 (429): %s", error_message)
-                key_manager.disable_key(current_key, reason="rate_limit")
-            elif "403" in error_message:
-                logger.error("API KEY 被禁用 (403): %s", error_message)
-                key_manager.disable_key(current_key, reason="banned")
-        
+        _handle_api_key_error(current_key, error_message)
         raise
 
 
@@ -144,6 +303,8 @@ def transcribe_with_gemini(
     extra_prompt = config.extra_prompt
     preview = config.transcription.preview
     max_segment_retries = config.transcription.max_segment_retries
+    api_source = config.api.source
+    base_url = config.api.base_url
 
     max_workers = config.processing.max_workers
     if max_workers is None:
@@ -162,9 +323,10 @@ def transcribe_with_gemini(
         raw_dir = ""
 
     logger.debug(
-        "開始轉錄處理，語言: %s，模型: %s，最大工作執行緒數: %s，時間偏移量: %s 秒，片段最大重試次數: %s",
+        "開始轉錄處理，語言: %s，模型: %s，API 來源: %s，最大工作執行緒數: %s，時間偏移量: %s 秒，片段最大重試次數: %s",
         lang,
         model_name,
+        api_source,
         max_workers,
         time_offset,
         max_segment_retries,
@@ -191,6 +353,7 @@ def transcribe_with_gemini(
     Task = collections.namedtuple(
         "Task", ["file_path", "original_index", "current_retry_count", "segment_time_offset"]
     )
+    worker = process_single_file_openai if api_source == "openai" else process_single_file
 
     tasks_to_process: collections.deque = collections.deque()
     duration = config.transcription.duration
@@ -212,7 +375,7 @@ def transcribe_with_gemini(
                     task.current_retry_count + 1,
                 )
                 future = executor.submit(
-                    process_single_file,
+                    worker,
                     task.file_path,
                     task.original_index,
                     duration,
@@ -220,7 +383,7 @@ def transcribe_with_gemini(
                     model_name,
                     save_raw,
                     raw_dir,
-                    config.api.base_url,
+                    base_url,
                     extra_prompt,
                     task.segment_time_offset,
                     preview,
