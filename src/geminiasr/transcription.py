@@ -62,6 +62,32 @@ def _post_openai_chat_completion(
         raise ValueError("OpenAI 相容端點回傳非 JSON 格式") from exc
 
 
+def _get_chunk_duration(file_path: str, default_duration: int) -> int:
+    try:
+        from moviepy import AudioFileClip
+        audio_clip = AudioFileClip(file_path)
+        try:
+            actual = int(audio_clip.duration)
+        finally:
+            audio_clip.close()
+        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual, default_duration)
+        return actual
+    except Exception as exc:
+        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
+        return default_duration
+
+
+def _handle_api_key_error(current_key: str | None, error_message: str) -> None:
+    if not current_key:
+        return
+    if "429" in error_message:
+        logger.warning("API KEY 限流錯誤 (429): %s", error_message)
+        key_manager.disable_key(current_key, reason="rate_limit")
+    elif "403" in error_message:
+        logger.error("API KEY 被禁用 (403): %s", error_message)
+        key_manager.disable_key(current_key, reason="banned")
+
+
 def process_single_file_openai(
     file_path: str,
     idx: int,
@@ -82,16 +108,7 @@ def process_single_file_openai(
     logger.debug("應用時間偏移量: %s 秒", time_offset)
     time1 = time.time()
 
-    # 讀取實際 chunk 時長用於精確驗證
-    try:
-        from moviepy import AudioFileClip
-        audio_clip = AudioFileClip(file_path)
-        actual_chunk_duration = int(audio_clip.duration)
-        audio_clip.close()
-        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual_chunk_duration, duration)
-    except Exception as exc:
-        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
-        actual_chunk_duration = duration
+    actual_chunk_duration = _get_chunk_duration(file_path, duration)
 
     prompt = get_transcription_prompt(lang, extra_prompt)
     logger.debug("已生成提示詞模板，語言設定: %s", lang)
@@ -169,15 +186,7 @@ def process_single_file_openai(
     except Exception as exc:
         logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
         error_message = str(exc)
-
-        if current_key and ("429" in error_message or "403" in error_message):
-            if "429" in error_message:
-                logger.warning("API KEY 限流錯誤 (429): %s", error_message)
-                key_manager.disable_key(current_key, reason="rate_limit")
-            elif "403" in error_message:
-                logger.error("API KEY 被禁用 (403): %s", error_message)
-                key_manager.disable_key(current_key, reason="banned")
-
+        _handle_api_key_error(current_key, error_message)
         raise
 
 
@@ -201,16 +210,7 @@ def process_single_file(
     logger.debug("應用時間偏移量: %s 秒", time_offset)
     time1 = time.time()
 
-    # 讀取實際 chunk 時長用於精確驗證
-    try:
-        from moviepy import AudioFileClip
-        audio_clip = AudioFileClip(file_path)
-        actual_chunk_duration = int(audio_clip.duration)
-        audio_clip.close()
-        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual_chunk_duration, duration)
-    except Exception as exc:
-        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
-        actual_chunk_duration = duration
+    actual_chunk_duration = _get_chunk_duration(file_path, duration)
 
     prompt = get_transcription_prompt(lang, extra_prompt)
     logger.debug("已生成提示詞模板，語言設定: %s", lang)
@@ -287,15 +287,7 @@ def process_single_file(
     except Exception as exc:
         logger.error("處理 %s 時發生錯誤: %s", file_path, exc)
         error_message = str(exc)
-
-        if current_key and ("429" in error_message or "403" in error_message):
-            if "429" in error_message:
-                logger.warning("API KEY 限流錯誤 (429): %s", error_message)
-                key_manager.disable_key(current_key, reason="rate_limit")
-            elif "403" in error_message:
-                logger.error("API KEY 被禁用 (403): %s", error_message)
-                key_manager.disable_key(current_key, reason="banned")
-
+        _handle_api_key_error(current_key, error_message)
         raise
 
 
@@ -313,8 +305,6 @@ def transcribe_with_gemini(
     max_segment_retries = config.transcription.max_segment_retries
     api_source = config.api.source
     base_url = config.api.base_url
-    if api_source == "openai" and base_url == DEFAULT_GEMINI_BASE_URL:
-        base_url = DEFAULT_OPENAI_COMPAT_BASE_URL
 
     max_workers = config.processing.max_workers
     if max_workers is None:

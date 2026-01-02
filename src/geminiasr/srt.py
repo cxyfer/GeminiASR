@@ -3,6 +3,8 @@ import re
 
 logger = logging.getLogger("geminiasr")
 
+CHUNK_DURATION_TOLERANCE = 5
+
 
 def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: int | None = None) -> str | None:
     try:
@@ -10,14 +12,12 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: in
         lines = transcript_text.strip().splitlines()
         logger.debug("轉錄文字包含 %s 行", len(lines))
 
-        srt_lines: list[str] = []
-        srt_index = 1
-
         line_regex = re.compile(r"^\[((?:\d{2}:)?\d{2}:\d{2}(?:\.\d+)?)\]\s*(.+)$")
-        matched_count = 0
         skipped_count = 0
         out_of_range_count = 0
+        valid_entries: list[tuple[float, str]] = []
 
+        # Phase 1: 解析並過濾有效行
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
@@ -41,8 +41,7 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: in
                 skipped_count += 1
                 continue
 
-            # 範圍檢查：過濾超出 chunk 範圍的時間戳（允許 5 秒容差）
-            if chunk_duration is not None and seconds > chunk_duration + 5:
+            if chunk_duration is not None and seconds > chunk_duration + CHUNK_DURATION_TOLERANCE:
                 logger.warning(
                     "第 %s 行時間戳超出範圍 (%.2f 秒 > chunk 時長 %s 秒): [%s] %s",
                     i + 1,
@@ -55,43 +54,34 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: in
                 skipped_count += 1
                 continue
 
-            seconds += time_offset
+            valid_entries.append((seconds + time_offset, content))
 
-            next_timestamp_seconds = None
-            default_duration = 3.0
-
-            for next_line in lines[i + 1 :]:
-                next_match = line_regex.match(next_line.strip())
-                if next_match:
-                    next_timestamp, _ = next_match.groups()
-                    next_timestamp_seconds = timestamp_to_seconds(next_timestamp)
-                    if next_timestamp_seconds is not None:
-                        next_timestamp_seconds += time_offset
-                        break
-
-            if next_timestamp_seconds is not None:
-                end_time = next_timestamp_seconds
+        # Phase 2: 基於有效行生成 SRT
+        srt_lines: list[str] = []
+        default_duration = 3.0
+        for idx, (seconds, content) in enumerate(valid_entries):
+            if idx + 1 < len(valid_entries):
+                end_time = valid_entries[idx + 1][0]
                 if end_time - seconds < 0.5:
                     end_time = seconds + 0.5
             else:
                 end_time = seconds + default_duration
+            # 限制 end_time 不超出 chunk 邊界
+            if chunk_duration is not None:
+                max_end = chunk_duration + time_offset + CHUNK_DURATION_TOLERANCE
+                if end_time > max_end:
+                    end_time = max_end
 
-            start_formatted = format_time_srt(seconds)
-            end_formatted = format_time_srt(end_time)
-
-            srt_lines.append(f"{srt_index}")
-            srt_lines.append(f"{start_formatted} --> {end_formatted}")
+            srt_lines.append(f"{idx + 1}")
+            srt_lines.append(f"{format_time_srt(seconds)} --> {format_time_srt(end_time)}")
             srt_lines.append(f"{content}")
             srt_lines.append("")
-
-            srt_index += 1
-            matched_count += 1
 
         if out_of_range_count > 0:
             logger.warning(
                 "SRT 轉換完成: 總行數=%s, 成功匹配=%s, 已跳過=%s (其中超出範圍=%s)",
                 len(lines),
-                matched_count,
+                len(valid_entries),
                 skipped_count,
                 out_of_range_count,
             )
@@ -99,7 +89,7 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: in
             logger.debug(
                 "SRT 轉換完成: 總行數=%s, 成功匹配=%s, 已跳過=%s",
                 len(lines),
-                matched_count,
+                len(valid_entries),
                 skipped_count,
             )
         return "\n".join(srt_lines)
