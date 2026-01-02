@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - None
 
+## [1.2.2] - 2026-01-02
+
+### Added
+- OpenAI-compatible API endpoint support as an alternative to Gemini native API
+- New configuration option `api.source` to switch between `"gemini"` and `"openai"` providers
+- Model recommendation documentation warning about Gemini 3 preview timestamp accuracy
+
+### Fixed
+- Fixed critical chunk timestamp overlap issue where chunk1 subtitles incorrectly contained chunk2's time range
+- Fixed end_time calculation bug that used filtered-out timestamps for duration calculation
+- Fixed resource leak in media splitting (proper `try/finally` for AudioFileClip cleanup)
+- Fixed typo in config comments (`offical` → `official`)
+
+### Changed
+- Simplified media parts calculation using `math.ceil()`
+- Refactored duplicate code into helper functions (`_get_chunk_duration`, `_handle_api_key_error`)
+- Improved SRT generation with two-phase processing and boundary checks
+- Added `CHUNK_DURATION_TOLERANCE` constant for timestamp validation
+
 ## [1.2.1] - 2026-01-01
 
 ### Fixed
