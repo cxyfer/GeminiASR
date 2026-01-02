@@ -4,7 +4,7 @@ import re
 logger = logging.getLogger("geminiasr")
 
 
-def direct_to_srt(transcript_text: str, time_offset: int = 0) -> str | None:
+def direct_to_srt(transcript_text: str, time_offset: int = 0, chunk_duration: int | None = None) -> str | None:
     try:
         logger.debug("開始將轉錄文字轉換為 SRT 格式，時間偏移: %s 秒", time_offset)
         lines = transcript_text.strip().splitlines()
@@ -16,6 +16,7 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0) -> str | None:
         line_regex = re.compile(r"^\[((?:\d{2}:)?\d{2}:\d{2}(?:\.\d+)?)\]\s*(.+)$")
         matched_count = 0
         skipped_count = 0
+        out_of_range_count = 0
 
         for i, line in enumerate(lines):
             line = line.strip()
@@ -37,6 +38,20 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0) -> str | None:
             seconds = timestamp_to_seconds(timestamp)
             if seconds is None:
                 logger.warning("第 %s 行時間戳解析失敗: %s", i + 1, timestamp)
+                skipped_count += 1
+                continue
+
+            # 範圍檢查：過濾超出 chunk 範圍的時間戳（允許 5 秒容差）
+            if chunk_duration is not None and seconds > chunk_duration + 5:
+                logger.warning(
+                    "第 %s 行時間戳超出範圍 (%.2f 秒 > chunk 時長 %s 秒): [%s] %s",
+                    i + 1,
+                    seconds,
+                    chunk_duration,
+                    timestamp,
+                    content[:30] + ("..." if len(content) > 30 else ""),
+                )
+                out_of_range_count += 1
                 skipped_count += 1
                 continue
 
@@ -72,12 +87,21 @@ def direct_to_srt(transcript_text: str, time_offset: int = 0) -> str | None:
             srt_index += 1
             matched_count += 1
 
-        logger.debug(
-            "SRT 轉換完成: 總行數=%s, 成功匹配=%s, 已跳過=%s",
-            len(lines),
-            matched_count,
-            skipped_count,
-        )
+        if out_of_range_count > 0:
+            logger.warning(
+                "SRT 轉換完成: 總行數=%s, 成功匹配=%s, 已跳過=%s (其中超出範圍=%s)",
+                len(lines),
+                matched_count,
+                skipped_count,
+                out_of_range_count,
+            )
+        else:
+            logger.debug(
+                "SRT 轉換完成: 總行數=%s, 成功匹配=%s, 已跳過=%s",
+                len(lines),
+                matched_count,
+                skipped_count,
+            )
         return "\n".join(srt_lines)
     except Exception as exc:
         logger.error("轉換為 SRT 格式時發生錯誤: %s", exc, exc_info=True)

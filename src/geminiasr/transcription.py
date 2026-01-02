@@ -82,6 +82,17 @@ def process_single_file_openai(
     logger.debug("應用時間偏移量: %s 秒", time_offset)
     time1 = time.time()
 
+    # 讀取實際 chunk 時長用於精確驗證
+    try:
+        from moviepy import AudioFileClip
+        audio_clip = AudioFileClip(file_path)
+        actual_chunk_duration = int(audio_clip.duration)
+        audio_clip.close()
+        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual_chunk_duration, duration)
+    except Exception as exc:
+        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
+        actual_chunk_duration = duration
+
     prompt = get_transcription_prompt(lang, extra_prompt)
     logger.debug("已生成提示詞模板，語言設定: %s", lang)
 
@@ -143,7 +154,7 @@ def process_single_file_openai(
             logger.info("原始轉錄結果已保存至: %s", raw_file)
 
         logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
-        srt_content = direct_to_srt(raw_transcript, time_offset)
+        srt_content = direct_to_srt(raw_transcript, time_offset, chunk_duration=actual_chunk_duration)
         if not srt_content:
             logger.error("轉錄 %s 失敗", file_path)
             raise ValueError("Empty transcript result")
@@ -189,6 +200,17 @@ def process_single_file(
     logger.info("正在轉錄 %s (索引 %s)...", basename, idx)
     logger.debug("應用時間偏移量: %s 秒", time_offset)
     time1 = time.time()
+
+    # 讀取實際 chunk 時長用於精確驗證
+    try:
+        from moviepy import AudioFileClip
+        audio_clip = AudioFileClip(file_path)
+        actual_chunk_duration = int(audio_clip.duration)
+        audio_clip.close()
+        logger.debug("Chunk 實際時長: %s 秒 (配置時長: %s 秒)", actual_chunk_duration, duration)
+    except Exception as exc:
+        logger.warning("無法讀取 chunk 實際時長，使用配置時長: %s", exc)
+        actual_chunk_duration = duration
 
     prompt = get_transcription_prompt(lang, extra_prompt)
     logger.debug("已生成提示詞模板，語言設定: %s", lang)
@@ -250,7 +272,7 @@ def process_single_file(
             logger.info("原始轉錄結果已保存至: %s", raw_file)
 
         logger.debug("處理轉錄結果，時間偏移: %s 秒", time_offset)
-        srt_content = direct_to_srt(raw_transcript, time_offset)
+        srt_content = direct_to_srt(raw_transcript, time_offset, chunk_duration=actual_chunk_duration)
         if not srt_content:
             logger.error("轉錄 %s 失敗", file_path)
             raise ValueError("Empty transcript result")
@@ -273,7 +295,7 @@ def process_single_file(
             elif "403" in error_message:
                 logger.error("API KEY 被禁用 (403): %s", error_message)
                 key_manager.disable_key(current_key, reason="banned")
-        
+
         raise
 
 
