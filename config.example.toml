@@ -35,6 +35,6 @@ google_api_keys = []
 # 進階設定
 [advanced]
 # extra_prompt = null  # Could be filepath or string. Leave empty to disable extra prompt
-base_url = "https://generativelanguage.googleapis.com/"  # Gemini offical endpoint
-# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"  # Gemini offical endpoint (Openai compatible)
+base_url = "https://generativelanguage.googleapis.com/"  # Gemini official endpoint
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"  # Gemini official endpoint (Openai compatible)
 # base_url = "https://api.xxxx.com/v1/"  # New-API endpoint
